@@ -1,9 +1,14 @@
 from interface_model import BasePINNModel
-from utils_BayesianLinearLayer import BayesianLinearLayer as BayesianLinear
+from utils_layer_BayesianLinearLayer import BayesianLinearLayer as BayesianLinear
 
 import torch
 import torch.nn as nn
 import math
+
+##########################################################
+# TODO: Change to PINN structure for this Bayesian Network
+##########################################################
+
 
 class BayesianFeedForwardPINN(BasePINNModel):
     """Feed-forward neural network with Bayesian linear layers (for VI)."""

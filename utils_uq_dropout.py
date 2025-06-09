@@ -1,4 +1,4 @@
-from utils_pinn import *
+from utils_model_pinn import *
 
 class DropoutPINN_MLP_1D(PINN_MLP_1D):
     def __init__(self, zeta: float, omega: float, 
