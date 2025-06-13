@@ -7,15 +7,6 @@ class BaseLayer(ABC, nn.Module):
     Abstract base class for any layer in a PINN (Bayesian or Deterministic).
     All derived layers must implement forward() and kl_divergence().
     """
-
-    def __init__(self, in_features, out_features, initialization):
-        super().__init__()
-        # in & out dims
-        self.in_features = in_features
-        self.out_features = out_features
-        # weights intialization method
-        self.initialization = initialization
-
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

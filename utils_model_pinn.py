@@ -1,10 +1,17 @@
-#Importing the necessary 
-import os
-import numpy as np 
+import torch
+import torch.nn as nn
 import math
-from tqdm import tqdm 
+
+from interface_model import BasePINNModel
+from utils_layer_DeterministicLinearLayer import DeterministicLinear
+
+#Importing the necessary
+import os
+import numpy as np
+import math
+from tqdm import tqdm
 from timeit import default_timer
-import matplotlib as mpl 
+import matplotlib as mpl
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pandas as pd
@@ -19,141 +26,121 @@ import sklearn
 from sklearn.neighbors import NearestNeighbors
 
 from itertools import chain, combinations
-import torch.nn as nn
-import math
+import torc.nn as nn
+import mathh
 
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from typing import Sequence, Tuple, List, Union, Callable
 ####################################################
 
+if torch.backends.mps.is_available():
+    device = torch.device("mps")  # Apple Silicon GPU (M1/M2/M3)
+elif torch.cuda.is_available():
+    device = torch.device("cuda")  # NVIDIA GPU
+else:
+    device = torch.device("cpu")   # Fallback to CPU
 
-class MLP(nn.Module):
-    def __init__(self, zeta: float, omega: float, 
-                 layers=(1, 64, 64, 64, 1), activation=torch.tanh, learn_pde_var=False):
+device = torch.device("cpu")
+torch.set_default_device(device)
+print(f"Using device: {device}")
+
+
+class DeterministicFeedForwardNN(BasePINNModel):
+    """Feed-forward neural network with Bayesian linear layers (for VI)."""
+    def __init__(self, input_dim, hidden_dims, output_dim, act_func=nn.Tanh()):
         super().__init__()
-        self.in_features = layers[0]
-        self.out_features = layers[-1]
-        self.num_layers = len(layers)
-        self.act_func = activation
-
-        self.input_layer = nn.Linear(layers[0], layers[1])
-        self.hidden_layers = nn.ModuleList([
-            nn.Linear(layers[i], layers[i + 1]) for i in range(1, self.num_layers - 2)
-        ])
-        self.output_layer = nn.Linear(layers[-2], layers[-1])
-
-        if learn_pde_var:
-            # Learnable physical parameters
-            self.zeta = nn.Parameter(torch.tensor(zeta))   # initial guess
-            self.omega = nn.Parameter(torch.tensor(omega))  # initial guess
-        else:
-            self.zeta = torch.tensor(zeta)  # initial guess
-            self.omega = torch.tensor(omega)  # initial guess
+        if isinstance(hidden_dims, int):
+            hidden_dims = [hidden_dims]
+        layers = []
+        prev_dim = input_dim
+        # Build hidden layers with BayesianLinear
+        for h in hidden_dims:
+            layers.append(DeterministicLinear(prev_dim, h))  # in_feat, out_feat
+            layers.append(act_func)
+            prev_dim = h
+        # Final output layer (Bayesian linear as well)
+        last_layer = DeterministicLinear(prev_dim, output_dim)
+        layers.append(last_layer)
+        self.layers = nn.ModuleList(layers)  # not using Sequential because it's a mix of custom and activations
 
 
-    def forward(self, x, return_hidden=False):
-        x = self.act_func(self.input_layer(x))
-        for layer in self.hidden_layers:
-            x = self.act_func(layer(x))
-        hidden = x
-        out = self.output_layer(hidden)
-        return (out, hidden) if return_hidden else out
-    
+    def forward(self, x):
+        out = x
+        for layer in self.layers:
+            # [BL, act, BL, act, ..., act, BL] go through all the layers
+            out = layer(out)  # BayesianLinear or activation
+        return out
 
-class PINN_MLP_1D(MLP):
+
+class PINN(DeterministicFeedForwardNN):
     """Learn a PINN model for different 1d PDE"""
 
-    def __init__(self, zeta: float, omega: float, layers, activation=torch.tanh, learn_pde_var=False):
-        super().__init__(zeta, omega, layers, activation, learn_pde_var)
-    
-    def fit_pinn_oscillator(self, 
-        t_c, t_d, x_d,
-        t0, x0, v0,
-        λ_pde = 10.0, λ_ic = 5.0, λ_data = 5.0,
-        epochs = 20_000,
-        lr = 3e-3,
-        print_every = 500,
-        scheduler_cls = StepLR,
-        scheduler_kwargs = {'step_size': 5000, 'gamma': 0.5},
-        warm_up_steps = 5000):
+    def __init__(self, pde_class, input_dim, layers, output_dim, activation=torch.tanh):
+        super().__init__(input_dim, layers, output_dim, activation)
+        self.pde = pde_class
 
-        self.to(device)  # move model to device
+    def fit_pinn(self,
+        X_train, Y_train, coloc_pt_num,
+        λ_pde = 1.0, λ_ic = 10.0, λ_bc = 10.0, λ_data = 5.0,
+        epochs = 20_000, lr = 3e-3, print_every = 500,
+        scheduler_cls = StepLR, scheduler_kwargs = {'step_size': 5000, 'gamma': 0.5},
+        stop_schedule = 40000):
 
-        # Ensure tensors are float32 and on correct device
-        t_c = t_c.to(dtype=torch.float32, device=device).requires_grad_()
-        t_d = t_d.to(dtype=torch.float32, device=device)
-        x_d = x_d.to(dtype=torch.float32, device=device)
-        t0  = t0.to(dtype=torch.float32, device=device).requires_grad_()
-        x0  = x0.to(dtype=torch.float32, device=device)
-        v0  = v0.to(dtype=torch.float32, device=device)
-
+        # move model to device
+        self.to(device)
         # Optimizer
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         # Scheduler
         scheduler = scheduler_cls(opt, **scheduler_kwargs) if scheduler_cls else None
 
         # Training History
-        tot_loss_his = []
         pde_loss_his = []
+        bc_loss_his = []
         ic_loss_his = []
         data_loss_his = []
 
         for ep in range(1, epochs + 1):
-            zeta = self.zeta
-            omega = self.omega
-
             opt.zero_grad()
 
-            # Warm-up Option: Loss Function with Warm-up Phase
-            if ep <= warm_up_steps:
-                # Data loss
-                x_pred = self(t_d)
-                loss_data = ((x_pred - x_d) ** 2).mean()
-                loss = loss_data
+            # Init them as 0
+            loss_data = 0
+            loss_pde = 0
+            loss_bc = 0
+            loss_ic = 0
 
-            else:
-                # Data loss
-                x_pred = self(t_d)
-                loss_data = ((x_pred - x_d) ** 2).mean()
-
-                # PDE residual
-                x_colloc = self(t_c)
-                dx_dt = torch.autograd.grad(x_colloc, t_c, torch.ones_like(x_colloc), create_graph=True)[0]
-                d2x_dt2 = torch.autograd.grad(dx_dt, t_c, torch.ones_like(dx_dt), create_graph=True)[0]
-                residual = d2x_dt2 + 2 * zeta * omega * dx_dt + (omega**2) * x_colloc
-                loss_pde = (residual ** 2).mean()
-
-                # Initial conditions
-                x0_pred = self(t0)
-                dx0_pred = torch.autograd.grad(x0_pred, t0, torch.ones_like(x0_pred), create_graph=True)[0]
-                loss_ic = (x0_pred - x0) ** 2 + (dx0_pred - v0) ** 2
-
-                # Total loss
-                loss = λ_pde * loss_pde + λ_data * loss_data + λ_ic * loss_ic
-
+            # Data loss
+            Y_pred = self.forward(X_train)
+            loss_data = ((Y_pred - Y_train) ** 2).mean()
+            loss=λ_data*loss_data
+            # PDE residual
+            if hasattr(self.pde, 'residual'):
+                loss_pde = self.pde.residual(self, coloc_pt_num)
+                loss+=λ_pde * loss_pde
+            # B.C. conditions
+            if hasattr(self.pde, 'boundary_loss'):
+                loss_bc = self.pde.boundary_loss(self)
+                loss+=λ_bc * loss_bc
+            # I.C. conditions
+            if hasattr(self.pde, 'ic_loss'):
+                loss_ic = self.pde.ic_loss(self)
+                loss+=λ_ic * loss_ic
             loss.backward()
             opt.step()
 
-            if ep <= 40000:  # Stop decreasing the learning rate
+            if ep <= stop_schedule:  # Stop decreasing the learning rate
                 if scheduler:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss.item())
-                    else:
+                    elif isinstance(scheduler, StepLR):
                         scheduler.step()
 
-            if (ep % print_every == 0 or ep == 1) and ep>warm_up_steps:  # Only start reporting after the warm-up Phase
-                print(f"ep {ep:5d} | L={loss.item():.2e}  "
-                    f"data={loss_data.item():.2e}  pde={loss_pde.item():.2e}  "
-                    f"ic={loss_ic.item():.2e} | lr={opt.param_groups[0]['lr']:.2e} |"
-                    f"zeta={zeta.item():.3e}, omega={omega.item():.3e}")
-                
-                tot_loss_his.append(loss.item())
-                pde_loss_his.append(loss_pde.item())
-                ic_loss_his.append(loss_ic.item())
-                data_loss_his.append(loss_data.item())
+            if (ep % print_every == 0 or ep == 1):  # Only start reporting after the warm-up Phase
+                print(f"ep {ep:5d} | L={loss.item():.2e} | "
+                    f"data={loss_data.item():.2e} | pde={loss_pde.item():.2e}  "
+                    f"ic={loss_ic.item():.2e}  bc={loss_bc.item():.2e} | lr={opt.param_groups[0]['lr']:.2e}")
 
-            elif (ep % print_every == 0 or ep == 1): 
-                print(f"ep {ep:5d} | L={loss.item():.2e}  "
-                    f"data={loss_data.item():.2e}")
+                pde_loss_his.append(loss_pde.item())
+                bc_loss_his.append(loss_bc.item())
+                data_loss_his.append(loss_data.item())
                 
-            return data_loss_his, ic_loss_his, pde_loss_his
+            return data_loss_his, ic_loss_his, bc_loss_his, pde_loss_his

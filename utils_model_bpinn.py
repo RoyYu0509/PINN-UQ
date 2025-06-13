@@ -4,15 +4,15 @@ from utils_layer_BayesianLinearLayer import BayesianLinearLayer as BayesianLinea
 import torch
 import torch.nn as nn
 import math
-
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 ##########################################################
 # TODO: Change to PINN structure for this Bayesian Network
 ##########################################################
 
 
-class BayesianFeedForwardPINN(BasePINNModel):
+class BayesianFeedForwardNN(BasePINNModel):
     """Feed-forward neural network with Bayesian linear layers (for VI)."""
-    def __init__(self, input_dim, hidden_dims, output_dim, prior_std=1.0, act_func=nn.Tanh()):
+    def __init__(self, input_dim, hidden_dims, output_dim, mu_std, rho, prior_std=1.0, act_func=nn.Tanh()):
         super().__init__()
         if isinstance(hidden_dims, int):
             hidden_dims = [hidden_dims]
@@ -20,11 +20,11 @@ class BayesianFeedForwardPINN(BasePINNModel):
         prev_dim = input_dim
         # Build hidden layers with BayesianLinear
         for h in hidden_dims:
-            layers.append(BayesianLinear(prev_dim, h, prior_std=prior_std))  # in_feat, out_feat, prior_std
+            layers.append(BayesianLinear(prev_dim, h, mu_std, rho, prior_std))  # in_feat, out_feat, prior_std
             layers.append(act_func)
             prev_dim = h
         # Final output layer (Bayesian linear as well)
-        layers.append(BayesianLinear(in_features = prev_dim, out_features = output_dim, prior_std=prior_std))
+        layers.append(BayesianLinear(prev_dim, output_dim, mu_std, rho, prior_std))
         self.layers = nn.ModuleList(layers)  # not using Sequential because it's a mix of custom and activations
 
     def forward(self, x):
@@ -41,3 +41,16 @@ class BayesianFeedForwardPINN(BasePINNModel):
             if isinstance(layer, BayesianLinear):
                 kl_total += layer.kl_divergence()
         return kl_total
+
+    def nll_gaussian(self, y_pred, y_true, data_noise_guess=1.0):
+        """
+        Full Gaussian Negative Log-Likelihood:
+        NLL = N/2 * log(2πσ²) + 1/(2σ²) * sum((y - y_pred)^2)
+        """
+        mse = (y_pred - y_true).pow(2).sum()
+        # const = N * torch.log(torch.tensor(2 * math.pi * data_noise_guess ** 2))
+        nll = 0.5 * (mse / (data_noise_guess ** 2))
+        return nll
+
+
+

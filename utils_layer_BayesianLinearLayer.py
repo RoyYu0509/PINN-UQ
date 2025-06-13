@@ -4,7 +4,8 @@ import torch.nn as nn
 import math
 
 def default_mu_rho(in_features, out_features,
-                   mu_mean=0.0, mu_std=0.1, rho=-3.0,
+                   mu_std=0.1, rho=-3.0,
+                   mu_mean=0.0,
                    prior_std=1.0):
 
     # Weights and Biases Distribution Initialization
@@ -14,7 +15,7 @@ def default_mu_rho(in_features, out_features,
     bias_rho = nn.Parameter(torch.empty(out_features).fill_(rho))
 
     # Std of the prior distribution
-    prior_std = 1.0
+    prior_std = prior_std
 
     return weight_mu, weight_rho, bias_mu, bias_rho, prior_std
 
@@ -23,7 +24,7 @@ class BayesianLinearLayer(BaseLayer):
         Bayesian Linear layer with Gaussian weight and bias priors and variational posteriors.
     """
 
-    def __init__(self, in_features, out_features, initialization=default_mu_rho):
+    def __init__(self, in_features, out_features, mu_std, rho, prior_std, initialization=default_mu_rho):
         super().__init__()
         # Mean and log-variance (or rho) for weights and biases as learnable parameters
         self.in_features = in_features
@@ -34,7 +35,7 @@ class BayesianLinearLayer(BaseLayer):
         # Since σ must be strictly positive, so we optimize rho, compute σ by softplus(rho)
         # So, we are still learning the std σ, but indirectly
         (self.weight_mu, self.weight_rho, self.bias_mu, self.bias_rho,
-         self.prior_std) = initialization(in_features, out_features)
+         self.prior_std) = initialization(in_features, out_features, mu_std=mu_std, rho=rho, prior_std=prior_std)
 
         # Prior standard deviation (fixed)
         self.log2pi = math.log(2 * math.pi)  # for potential use in exact logprob if needed

@@ -6,14 +6,6 @@ class BasePINNModel(ABC, nn.Module):
     """
     Abstract base class for Physics-Informed Neural Network models (both deterministic and Bayesian).
     """
-
-    def __init__(self, in_features, out_features, initialization):
-        super().__init__()
-        # Mean and log-variance (or rho) for weights and biases as learnable parameters
-        self.in_features = in_features
-        self.out_features = out_features
-
-
     @abstractmethod
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

@@ -8,6 +8,7 @@ import math
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 
 
+
 class VIBPINN(BayesianFeedForwardNN):
     """Bayesian PINN training using Variational Inference (mean-field Gaussian approximation)."""
     def __init__(self, pde_class, input_dim, hidden_dims, output_dim, mu_std, rho, prior_std=1.0, act_func=nn.Tanh()):
@@ -65,7 +66,7 @@ class VIBPINN(BayesianFeedForwardNN):
 
             # NLL
             Y_pred = self.forward(X_train)
-            loss_data = self.nll_gaussian(Y_pred, Y_train, noise_std=data_noise_guess)
+            loss_data = self.nll_gaussian(Y_pred, Y_train, data_noise_guess=data_noise_guess)
 
             # Negative ELBO
             n_elbo = loss_data+kl_div
@@ -106,6 +107,8 @@ class VIBPINN(BayesianFeedForwardNN):
                         scheduler.step()
 
         return {"ELBO": data_loss_his, "Initial Condition Loss": ic_loss_his, "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
+
+
 
     def predict(self, x_test, n_samples=100):
         """Draw samples from the variational posterior to estimate predictive mean and variance."""

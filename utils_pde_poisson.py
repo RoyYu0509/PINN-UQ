@@ -3,7 +3,7 @@ from interface_pde import *
 # We define classes for specific PDEs to compute residuals and boundary losses.
 class Poisson1D(BasePDE):
     """1D Poisson equation: u''(x) = f(x), on domain [x0, x1] with Dirichlet boundary conditions."""
-    def __init__(self, f_func, domain, bc_values):
+    def __init__(self, f_func, bc_values, domain, true_solution):
         """
         f_func: a function f(x) defining the source term.
         domain: tuple (x0, x1) specifying domain interval.
@@ -12,8 +12,23 @@ class Poisson1D(BasePDE):
         self.f = f_func
         self.x0, self.x1 = domain
         self.u0, self.u1 = bc_values  # boundary condition values
+        self.true_solution = true_solution
 
-    def residual(self, model, x):
+    def residual(self, model, coloc_pt_num):
+        """
+        Sample collocation points in time domain [0, T], and compute residual at those points.
+        Parameters:
+            model: the neural network approximating u(t)
+            coloc_pt_num: number of collocation points to sample
+        Returns:
+            residuals: tensor of shape [coloc_pt_num, 1]
+        """
+        # Uniformly sample collocation points (excluding t=0 for boundary condition)
+        t = torch.linspace(self.x0, self.x1, coloc_pt_num).view(-1, 1)
+        t = t.to(dtype=torch.float32)
+        return (self._residual(model, t) ** 2).mean()
+
+    def _residual(self, model, x):
         """Compute the PDE residual r(x) = u''(x) - f(x)."""
         # Ensure x requires grad for autograd (for computing derivatives)
         x = x.requires_grad_(True)
@@ -36,3 +51,4 @@ class Poisson1D(BasePDE):
         # Mean squared error on boundary constraints
         loss_bc = (u0_pred - self.u0)**2 + (u1_pred - self.u1)**2
         return loss_bc.mean()  # mean (if multiple points, though here just two points)
+
