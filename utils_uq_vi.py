@@ -7,46 +7,52 @@ import torch.nn as nn
 import math
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 
-
 class VIBPINN(BayesianFeedForwardNN):
-    """Bayesian PINN training using Variational Inference (mean-field Gaussian approximation)."""
-    def __init__(self, pde_class, input_dim, hidden_dims, output_dim, mu_std, rho, prior_std=1.0, act_func=nn.Tanh()):
+    """Bayesian PINN training using Variational Inference (mean-field Gaussian approximation), with learnable data noise."""
+    def __init__(self, pde_class, input_dim, hidden_dims, output_dim,
+                 mu_std, rho, prior_std=1.0, init_data_noise=1.0, learn_data_noise=False, act_func=nn.Tanh()):
         """
-        model: BayesianFeedForwardNN (with BayesianLinear layers).
-        pde: an instance of Poisson1D, DampedOscillator1D, or similar (must have residual() & boundary_loss()).
-        x_collocation: tensor of collocation points in domain interior for physics residual.
-        x_boundary: tensor of boundary (or initial) points.
-        boundary_values: actual values at boundary (if needed by some PDE, not used directly if pde.boundary_loss handles it).
+        pde_class: an instance of a PDE class (e.g., Poisson1D, DampedOscillator1D, etc.)
+        input_dim: input dimension size
+        hidden_dims: list of hidden layer dimensions
+        output_dim: output dimension size
+        mu_std, rho: parameters for the Bayesian linear layers
+        prior_std: standard deviation of the prior on the weights (default 1.0)
+        act_func: activation function (default Tanh)
+        init_data_noise: initial guess for the data noise standard deviation (learned during training)
         """
         super().__init__(input_dim, hidden_dims, output_dim, mu_std, rho, prior_std, act_func)
         self.pde = pde_class
+        # Define a learnable parameter for the log of the data noise standard deviation.
+        if learn_data_noise:
+            self.log_noise = nn.Parameter(torch.tensor(math.log(init_data_noise), dtype=torch.float32))
+        else:
+            self.log_noise = torch.tensor(math.log(init_data_noise), dtype=torch.float32)
+
 
     def fit_vi_bpinn(self,
         coloc_pt_num,
         X_train=torch.tensor, Y_train=torch.tensor,
-        data_noise_guess = 1.0,
         λ_pde=1.0, λ_ic=1.0, λ_bc=1.0, λ_elbo=1.0, λ_data=1.0,
         epochs=20_000, lr=3e-3,
         scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
         stop_schedule=40000):
-        # Optimizer
+        # Optimizer: note that self.log_noise is included among the parameters.
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         # Scheduler
         scheduler = scheduler_cls(opt, **scheduler_kwargs) if scheduler_cls else None
 
-        # Training History
+        # Training histories
         pde_loss_his = []
         bc_loss_his = []
         ic_loss_his = []
         data_loss_his = []
 
-
-        # Determine what are the losses the pde have
+        # Check which losses the PDE provides
         has_residue_l = hasattr(self.pde, 'residual')
         has_bc_l = hasattr(self.pde, 'boundary_loss')
         has_ic_l = hasattr(self.pde, 'ic_loss')
 
-        # Autogenerate print_every setting
         print_every = epochs / 100
 
         self.train()
@@ -58,64 +64,70 @@ class VIBPINN(BayesianFeedForwardNN):
             loss_bc = 0
             loss_ic = 0
 
-            # Compute physics-informed loss:
-            # normalized KL Divergence
+            # Total number of points for normalization
             total_pt_num = coloc_pt_num + X_train.shape[0]
-            kl_div = self.kl_divergence()/total_pt_num
+            kl_div = self.kl_divergence() / total_pt_num
 
-            # NLL
+            # Compute the predictions and the negative log-likelihood loss,
+            # using the learned noise standard deviation: noise_std = exp(log_noise)
             Y_pred = self.forward(X_train)
-            loss_data = self.nll_gaussian(Y_pred, Y_train, noise_std=data_noise_guess)
+            noise_std = torch.exp(self.log_noise)
+            loss_data = self.nll_gaussian(Y_pred, Y_train, data_noise_guess=noise_std)
 
             # Negative ELBO
-            n_elbo = loss_data+kl_div
-            data_loss_his.append(n_elbo)
+            n_elbo = loss_data + kl_div
+            data_loss_his.append(n_elbo.item())
 
-            # PDE residual
+            # PDE residual loss (if applicable)
             if has_residue_l:
                 loss_pde = (self.pde.residual(self, coloc_pt_num)**2).mean()
-                pde_loss_his.append(loss_pde)
+                pde_loss_his.append(loss_pde.item())
 
-            # B.C. conditions
+            # Boundary conditions loss (if applicable)
             if has_bc_l:
                 loss_bc = self.pde.boundary_loss(self)
-                bc_loss_his.append(loss_bc)
+                bc_loss_his.append(loss_bc.item())
 
-            # I.C. conditions
+            # Initial conditions loss (if applicable)
             if has_ic_l:
                 loss_ic = self.pde.ic_loss(self)
-                ic_loss_his.append(loss_ic)
+                ic_loss_his.append(loss_ic.item())
 
-            # Combined loss = physics loss (acts like negative log-likelihood) + KL/N
-            loss = λ_pde*loss_pde +  λ_ic*loss_ic + λ_bc*loss_bc + λ_elbo*n_elbo
+            # Combined loss: physics loss + negative ELBO + regularization terms
+            loss = λ_pde * loss_pde + λ_ic * loss_ic + λ_bc * loss_bc + λ_elbo * n_elbo
             loss.backward()
             opt.step()
 
-            # Optionally print progress
-            if epoch % print_every == 0 or epoch == 1:  # Only start reporting after the warm-up Phase
-                print(f"ep {epoch:5d} | L={loss:.2e} | "
-                      f"elbo={n_elbo:.2e} | pde={loss_pde:.2e}  "
-                      f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e}")
+            # Optionally print training progress
+            if epoch % print_every == 0 or epoch == 1:
+                print(f"ep {epoch:5d} | L={loss:.2e} | elbo={n_elbo:.2e} | pde={loss_pde:.2e}  "
+                      f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e} "
+                      f"| learned noise_std={noise_std.item():.3e}")
 
-
-            if epoch <= stop_schedule:  # Stop decreasing the learning rate
+            if epoch <= stop_schedule:
                 if scheduler:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss.item())
                     elif isinstance(scheduler, StepLR):
                         scheduler.step()
 
-        return {"ELBO": data_loss_his, "Initial Condition Loss": ic_loss_his, "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
+        return {"ELBO": data_loss_his, "Initial Condition Loss": ic_loss_his,
+                "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
-    def predict(self, x_test, n_samples=100):
-        """Draw samples from the variational posterior to estimate predictive mean and variance."""
+    def predict(self, x_test, n_samples=100, z_score=1.96):
+        """Draw samples from the variational posterior and return prediction bounds
+        with configurable confidence level."""
         self.eval()
         preds = []
         for _ in range(n_samples):
-            # Forward pass will sample a new set of weights each time (due to BayesianLinear)
             y_pred = self.forward(x_test)
             preds.append(y_pred.detach())
-        preds = torch.stack(preds)  # shape [n_samples, batch_size, output_dim]
+        preds = torch.stack(preds)
+
         mean = preds.mean(dim=0)
-        var = preds.var(dim=0)  # predictive variance
-        return mean, var
+        std = preds.std(dim=0)
+
+        lower_bound = mean - z_score * std
+        upper_bound = mean + z_score * std
+
+        return [lower_bound, upper_bound]
