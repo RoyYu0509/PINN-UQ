@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
+from utils_model_pinn import *
+from utils_layer_DeterministicLinearLayer import DeterministicLinear
 
 # ───────────────────────────────────────────────────────────────────────────────
 #  1.  Feed-forward network that inserts Drop-out after every deterministic layer
@@ -51,9 +53,7 @@ class DropoutPINN(PINN):
 
     Usage
     -----
-    >>> model = DropoutPINN(pde, 1, [64,64,64], 1, p_drop=0.05)
-    >>> model.fit_pinn(X_train, Y_train, coloc_pt_num, epochs=30_000)
-    >>> mean, std, (lower, upper) = model.predict_uq(x_test, n_samples=200, alpha=0.05)
+
     """
     def __init__(self,
                  pde_class,
@@ -61,20 +61,87 @@ class DropoutPINN(PINN):
                  hidden_dims,
                  output_dim: int,
                  p_drop: float = 0.1,
-                 activation = torch.tanh):
+                 activation = nn.Tanh()):
+        # Register backbone parameters inside BasePINNModel
+        super(PINN, self).__init__(input_dim, hidden_dims, output_dim)  # skip PINN.__init__, call one level up
         # Build backbone with dropout layers
         self.backbone = DeterministicDropoutNN(input_dim, hidden_dims,
                                                output_dim, p_drop, activation)
-        # Register backbone parameters inside BasePINNModel
-        super(PINN, self).__init__()       # skip PINN.__init__, call one level up
         self.__dict__.update(self.backbone.__dict__)  # merge state (quick hack)
         self.pde = pde_class               # physics callbacks
+
+    def fit_do_pinn(self,
+                 coloc_pt_num,
+                 X_train, Y_train,
+                 λ_pde=1.0, λ_ic=10.0, λ_bc=10.0, λ_data=5.0,
+                 epochs=20_000, lr=3e-3, print_every=500,
+                 scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
+                 stop_schedule=40000):
+
+        # move model to device
+        self.to(device)
+        # Optimizer
+        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        # Scheduler
+        scheduler = scheduler_cls(opt, **scheduler_kwargs) if scheduler_cls else None
+
+        # Training History
+        pde_loss_his = []
+        bc_loss_his = []
+        ic_loss_his = []
+        data_loss_his = []
+
+        for ep in range(1, epochs + 1):
+            opt.zero_grad()
+
+            # Init them as 0
+            loss_data = 0
+            loss_pde = 0
+            loss_bc = 0
+            loss_ic = 0
+
+            # Data loss
+            Y_pred = self.forward(X_train)
+            loss_data = ((Y_pred - Y_train) ** 2).mean()
+            loss = λ_data * loss_data
+            # PDE residual
+            if hasattr(self.pde, 'residual'):
+                loss_pde = self.pde.residual(self, coloc_pt_num)
+                loss += λ_pde * loss_pde
+            # B.C. conditions
+            if hasattr(self.pde, 'boundary_loss'):
+                loss_bc = self.pde.boundary_loss(self)
+                loss += λ_bc * loss_bc
+            # I.C. conditions
+            if hasattr(self.pde, 'ic_loss'):
+                loss_ic = self.pde.ic_loss(self)
+                loss += λ_ic * loss_ic
+            loss.backward()
+            opt.step()
+
+            if ep <= stop_schedule:  # Stop decreasing the learning rate
+                if scheduler:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss.item())
+                    elif isinstance(scheduler, StepLR):
+                        scheduler.step()
+
+            if (ep % print_every == 0 or ep == 1):  # Only start reporting after the warm-up Phase
+                print(f"ep {ep:5d} | L={loss:.2e} | "
+                      f"data={loss_data:.2e} | pde={loss_pde:.2e}  "
+                      f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e}")
+
+                pde_loss_his.append(loss_pde.item())
+                bc_loss_his.append(loss_bc.item())
+                data_loss_his.append(loss_data.item())
+
+        return data_loss_his, ic_loss_his, bc_loss_his, pde_loss_his
 
     # -------------------------------------------------------------------------
     # Uncertainty-aware prediction
     # -------------------------------------------------------------------------
     @torch.inference_mode()
-    def predict_uq(self,
+    def predict(self,
                    x: torch.Tensor,
                    n_samples: int = 100,
                    alpha: float = 0.05,
@@ -114,8 +181,8 @@ class DropoutPINN(PINN):
         upper = mean + z*std
 
         if return_samples:
-            return mean, std, (lower, upper), preds
-        return mean, std, (lower, upper)
+            return (lower, upper)
+        return (lower, upper)
 
     # -------------------------------------------------------------------------
     # Helper: keep dropout layers “on” during evaluation

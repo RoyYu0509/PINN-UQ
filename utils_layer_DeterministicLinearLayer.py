@@ -16,11 +16,12 @@ class DeterministicLinear(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        # Weights initialization
-        initialization(self.weight, self.bias, math.sqrt(5))
         # Create learnable parameters: weight and bias
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.empty(out_features))
+        # Weights initialization
+        initialization(self.weight, self.bias, math.sqrt(5))
+
 
     def forward(self, x):
         return x.matmul(self.weight.t()) + self.bias

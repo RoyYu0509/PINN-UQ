@@ -1,37 +1,11 @@
+from interface_model import BasePINNModel
+
 import torch
 import torch.nn as nn
 import math
-
-from interface_model import BasePINNModel
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from utils_layer_DeterministicLinearLayer import DeterministicLinear
 
-#Importing the necessary
-import os
-import numpy as np
-import math
-from tqdm import tqdm
-from timeit import default_timer
-import matplotlib as mpl
-from matplotlib import pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import pandas as pd
-import random
-
-import torch, math, matplotlib.pyplot as plt
-from torch import nn
-# from pyDOE import lhs
-# from utils import *
-
-import sklearn
-from sklearn.neighbors import NearestNeighbors
-
-from itertools import chain, combinations
-import torc.nn as nn
-import mathh
-
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
-from typing import Sequence, Tuple, List, Union, Callable
-####################################################
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")  # Apple Silicon GPU (M1/M2/M3)
@@ -99,7 +73,7 @@ class PINN(DeterministicFeedForwardNN):
         ic_loss_his = []
         data_loss_his = []
 
-        for ep in range(1, epochs + 1):
+        for epoch in range(1, epochs + 1):
             opt.zero_grad()
 
             # Init them as 0
@@ -127,20 +101,18 @@ class PINN(DeterministicFeedForwardNN):
             loss.backward()
             opt.step()
 
-            if ep <= stop_schedule:  # Stop decreasing the learning rate
+
+            # Optionally print training progress
+            if epoch % print_every == 0 or epoch == 1:
+                print(f"ep {epoch:5d} | L={loss:.2e} | pde={loss_pde:.2e}  "
+                      f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e} ")
+
+            if epoch <= stop_schedule:
                 if scheduler:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss.item())
                     elif isinstance(scheduler, StepLR):
                         scheduler.step()
 
-            if (ep % print_every == 0 or ep == 1):  # Only start reporting after the warm-up Phase
-                print(f"ep {ep:5d} | L={loss.item():.2e} | "
-                    f"data={loss_data.item():.2e} | pde={loss_pde.item():.2e}  "
-                    f"ic={loss_ic.item():.2e}  bc={loss_bc.item():.2e} | lr={opt.param_groups[0]['lr']:.2e}")
-
-                pde_loss_his.append(loss_pde.item())
-                bc_loss_his.append(loss_bc.item())
-                data_loss_his.append(loss_data.item())
-                
-            return data_loss_his, ic_loss_his, bc_loss_his, pde_loss_his
+        return {"Data Loss": data_loss_his, "Initial Condition Loss": ic_loss_his,
+                "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
