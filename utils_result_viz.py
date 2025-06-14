@@ -149,3 +149,45 @@ def plot_training_history(loss_dict, title="Training Loss History", figsize=(10,
     ax.grid(True)
     plt.tight_layout()
     plt.show()
+
+
+
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def plot_expected_vs_empirical(df, alpha_col='alpha', cov_col='coverage', title='Coverage Plot'):
+    """
+    Plots Expected Coverage (1 - alpha) vs Empirical Coverage from a DataFrame,
+    and adds manual anchor points at (0, 0) and (1, 1).
+    
+    Parameters:
+    - df: pd.DataFrame with 'alpha' and 'coverage' columns
+    - alpha_col: column name for alpha values
+    - cov_col: column name for empirical coverage
+    - title: plot title
+    """
+    # Compute expected and empirical
+    expected = 1 - df[alpha_col]
+    empirical = df[cov_col]
+
+    # Add anchor points
+    expected_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])], ignore_index=True)
+    empirical_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])], ignore_index=True)
+
+    # Sort by expected for clean line plot
+    sorted_idx = expected_full.argsort()
+    expected_sorted = expected_full[sorted_idx]
+    empirical_sorted = empirical_full[sorted_idx]
+
+    # Plot
+    plt.figure(figsize=(6, 6))
+    plt.plot(expected_sorted, empirical_sorted, marker='o', label='Empirical Coverage')
+    plt.plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
+    plt.xlabel("Expected Coverage (1 − α)")
+    plt.ylabel("Empirical Coverage")
+    plt.title(title)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

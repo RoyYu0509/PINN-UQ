@@ -1,95 +1,130 @@
-from utils_model_pinn import *
+import torch
+import torch.nn as nn
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 
-class DropoutPINN_MLP_1D(PINN_MLP_1D):
-    def __init__(self, zeta: float, omega: float, 
-                 layers=(1, 64, 64, 64, 1), 
-                 activation=torch.tanh,
-                 learn_pde_var=False,
-                 p_drop=0.1):
-        super().__init__(zeta, omega, layers, activation, learn_pde_var)
-        
-        self.dropout_rate = p_drop
+# ───────────────────────────────────────────────────────────────────────────────
+#  1.  Feed-forward network that inserts Drop-out after every deterministic layer
+# ───────────────────────────────────────────────────────────────────────────────
 
-        # Convert function to module
-        if activation == torch.tanh:
-            act_module = nn.Tanh()
-        elif activation == torch.relu:
-            act_module = nn.ReLU()
-        elif activation == torch.sigmoid:
-            act_module = nn.Sigmoid()
-        else:
-            raise ValueError("Unsupported activation. Use torch.tanh, torch.relu, or torch.sigmoid.")
+class DeterministicDropoutNN(BasePINNModel):
+    """
+    Fully–connected network identical to DeterministicFeedForwardNN,
+    but each hidden block is Linear ▸ Dropout ▸ Activation.
+    """
+    def __init__(self,
+                 input_dim: int,
+                 hidden_dims,
+                 output_dim: int,
+                 p_drop: float = 0.1,
+                 act_func = nn.Tanh()
+    ):
+        super().__init__()
+        if isinstance(hidden_dims, int):
+            hidden_dims = [hidden_dims]
 
-        # Redefine layers with dropout
-        self.input_layer = nn.Sequential(
-            nn.Linear(layers[0], layers[1]),
-            act_module,
-            nn.Dropout(p_drop)
-        )
+        self.p_drop = p_drop
+        layers = []
+        prev = input_dim
+        for h in hidden_dims:
+            layers.extend([
+                DeterministicLinear(prev, h),
+                nn.Dropout(p_drop),           # <── new
+                act_func
+            ])
+            prev = h
+        layers.append(DeterministicLinear(prev, output_dim))
+        self.layers = nn.ModuleList(layers)
 
-        self.hidden_layers = nn.ModuleList()
-        for i in range(1, len(layers) - 2):
-            self.hidden_layers.append(nn.Sequential(
-                nn.Linear(layers[i], layers[i + 1]),
-                act_module,
-                nn.Dropout(p_drop)
-            ))
-
-        self.output_layer = nn.Linear(layers[-2], layers[-1])
-    
-    # Redefine the forward() method
-    def forward(self, x, return_hidden=False):
-        x = self.input_layer(x)
-        for layer in self.hidden_layers:
+    def forward(self, x):
+        for layer in self.layers:
             x = layer(x)
-        hidden = x
-        out = self.output_layer(hidden)
-        return (out, hidden) if return_hidden else out
+        return x
 
-    # -------------- utility ----------
-    def _set_dropout(self, active: bool):
+
+# ───────────────────────────────────────────────────────────────────────────────
+#  2.  PINN wrapper with the standard physics losses *plus* MC-Drop-out UQ
+# ───────────────────────────────────────────────────────────────────────────────
+
+class DropoutPINN(PINN):
+    """
+    Physics-Informed Neural Network with Monte-Carlo Drop-out for UQ.
+
+    Usage
+    -----
+    >>> model = DropoutPINN(pde, 1, [64,64,64], 1, p_drop=0.05)
+    >>> model.fit_pinn(X_train, Y_train, coloc_pt_num, epochs=30_000)
+    >>> mean, std, (lower, upper) = model.predict_uq(x_test, n_samples=200, alpha=0.05)
+    """
+    def __init__(self,
+                 pde_class,
+                 input_dim: int,
+                 hidden_dims,
+                 output_dim: int,
+                 p_drop: float = 0.1,
+                 activation = torch.tanh):
+        # Build backbone with dropout layers
+        self.backbone = DeterministicDropoutNN(input_dim, hidden_dims,
+                                               output_dim, p_drop, activation)
+        # Register backbone parameters inside BasePINNModel
+        super(PINN, self).__init__()       # skip PINN.__init__, call one level up
+        self.__dict__.update(self.backbone.__dict__)  # merge state (quick hack)
+        self.pde = pde_class               # physics callbacks
+
+    # -------------------------------------------------------------------------
+    # Uncertainty-aware prediction
+    # -------------------------------------------------------------------------
+    @torch.inference_mode()
+    def predict_uq(self,
+                   x: torch.Tensor,
+                   n_samples: int = 100,
+                   alpha: float = 0.05,
+                   keep_dropout: bool = True,
+                   return_samples: bool = False):
         """
-        If active=True  ➜ model.train()  (dropout ON)
-        If active=False ➜ model.eval()   (dropout OFF)
+        Parameters
+        ----------
+        x : (N, d_in) tensor on same device / dtype as model
+        n_samples : number of MC forward passes
+        alpha : 1 – confidence level; alpha=0.05 → 95 % interval
+        keep_dropout : if True, forces dropout active during inference
+        return_samples : if True, also returns the raw (n_samples, N, out) tensor
+
+        Returns
+        -------
+        mean  : (N, out)
+        std   : (N, out)
+        bounds: (lower, upper) each shape (N, out)
         """
-        if active:
-            super().train()   # keep everything else identical
-        else:
-            super().eval()
+        if keep_dropout:
+            self.enable_mc_dropout()
 
-    # ------------- TRAINING ----------
-    def fit_pinn_oscillator(self, *args, drop_activate=False ,**kwargs):
-        # 1 deactivate the dropout during model training
-        self._set_dropout(active=drop_activate)
+        preds = []
+        for _ in range(n_samples):
+            preds.append(self.forward(x))
+        preds = torch.stack(preds)                         # (S, N, out)
+        mean = preds.mean(0)
+        std  = preds.std(0)
 
-        # 2 call the parent implementation (unchanged)
-        return super().fit_pinn_oscillator(*args, **kwargs)
+        # Two-sided (1-alpha) Gaussian interval
+        z = torch.tensor(
+            abs(torch.distributions.Normal(0,1).icdf(torch.tensor(alpha/2))),
+            device=preds.device, dtype=preds.dtype
+        )
+        lower = mean - z*std
+        upper = mean + z*std
 
-    # ------------- INFERENCE ----------
-    @torch.no_grad()
-    def predict(self, t, mc_samples=100, return_std=False, drop_activate=False):
-        if drop_activate:
-            # 1 reactivate dropout *only* for MC-sampling  
-            self._set_dropout(active=drop_activate)
-            
-            # Conduct MCMC sampling using the model with drop out activate
-            preds = []
-            for _ in range(mc_samples):
-                y = super(DropoutPINN_MLP_1D, self).forward(t.float())
-                if isinstance(y, tuple):
-                    y = y[0]
-                preds.append(y.cpu().numpy())
+        if return_samples:
+            return mean, std, (lower, upper), preds
+        return mean, std, (lower, upper)
 
-            # 2 switch back to eval to avoid surprises later
-            self._set_dropout(active=False)
-
-            preds = np.stack(preds, axis=0)
-            mean = preds.mean(axis=0)
-            std  = preds.std(axis=0)
-        else:                                 # deterministic
-            self._set_dropout(False)
-            y = super().forward(t)
-            y = y[0] if isinstance(y, tuple) else y
-            mean = y
-            std  = torch.zeros_like(mean)
-        return (mean, std) if return_std else mean
+    # -------------------------------------------------------------------------
+    # Helper: keep dropout layers “on” during evaluation
+    # -------------------------------------------------------------------------
+    def enable_mc_dropout(self):
+        """
+        Puts *all* Dropout sub-modules into training mode while leaving the rest
+        of the network untouched.  Recommended before calling `predict_uq`.
+        """
+        for m in self.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()

@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 class VIBPINN(BayesianFeedForwardNN):
     """Bayesian PINN training using Variational Inference (mean-field Gaussian approximation), with learnable data noise."""
     def __init__(self, pde_class, input_dim, hidden_dims, output_dim,
-                 mu_std, rho, prior_std=1.0, init_data_noise=1.0, learn_data_noise=False, act_func=nn.Tanh()):
+                 mu_std = 0.01, rho = -3, prior_std=1.0, init_data_noise=1.0, learn_data_noise=False, act_func=nn.Tanh()):
         """
         pde_class: an instance of a PDE class (e.g., Poisson1D, DampedOscillator1D, etc.)
         input_dim: input dimension size

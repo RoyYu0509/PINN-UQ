@@ -3,7 +3,6 @@ import os
 import numpy as np
 import math
 from tqdm import tqdm
-from timeit import default_timer
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -11,12 +10,11 @@ import pandas as pd
 
 import torch
 import torch.nn as nn
-from pyDOE import lhs
-from utils import *
-
 import sklearn
 from sklearn.neighbors import NearestNeighbors
 from utils_uq_vi import VIBPINN
+
+from scipy.stats import norm
 
 
 if torch.backends.mps.is_available():
@@ -49,12 +47,10 @@ def _coverage(pred_set, y_true):
     -------
     float   in the range [0, 1]
     """
-    y_np = _to_numpy(y_true)
-
     lower, upper = pred_set[0], pred_set[1]
-
-    inside = (y_np >= lower) & (y_np <= upper)
-    return inside.mean().item()
+    y_true = y_true.to(lower.device)
+    inside = (y_true >= lower) & (y_true <= upper)
+    return inside.float().mean().item()
 
 
 # Define Sharpness
@@ -67,7 +63,7 @@ def _sharpness(pred_set):
     lower = pred_set[0]
     upper = pred_set[1]
 
-    return (upper - lower).mean()
+    return (upper - lower).mean().item()
 
 
 # Test coverage under different level of uncertainty
@@ -86,13 +82,31 @@ def test_uncertainties(uqmodel, alphas, X_test, Y_test):
     # Test VI model
     if isinstance(uqmodel, VIBPINN):
         results = []
-        def z_score(conf_level):
-            alpha = 1 - conf_level
+
+        def miscoverage_to_z(alpha):  # alpha in (0,1)
             return norm.ppf(1 - alpha / 2)
 
         for alpha in tqdm(alphas):
-            z = z_score(alphas)
-            pred_set = uqmodel.predict(X_test, Y_test, z)
+            alpha_val = float(alpha.item())
+            if not (0.0 < alpha_val < 1.0):
+                raise ValueError("alpha must be in (0,1) for VI.")
+            z = miscoverage_to_z(alpha_val)
+            z = torch.tensor(z, dtype=torch.float32, device=X_test.device)
+            pred_set = uqmodel.predict(X_test, n_samples=100, z_score=z)
+            coverage = _coverage(pred_set, Y_test)
+            sha = _sharpness(pred_set)
+
+            results.append({
+                "alpha": alpha_val,
+                "coverage": coverage,
+                "sharpness": sha
+            })
+
+    else:
+        results = []
+
+        for alpha in tqdm(alphas):
+            pred_set = uqmodel.predict(X_test, Y_test, alpha)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
 
@@ -101,19 +115,6 @@ def test_uncertainties(uqmodel, alphas, X_test, Y_test):
                 "coverage": coverage,
                 "sharpness": sha
             })
-
-    results = []
-
-    for alpha in tqdm(alphas):
-        pred_set = uqmodel.predict(X_test, Y_test, alpha)
-        coverage = _coverage(pred_set, Y_test)
-        sha = _sharpness(pred_set)
-
-        results.append({
-            "alpha": alpha,
-            "coverage": coverage,
-            "sharpness": sha
-        })
 
     return pd.DataFrame(results)
 
