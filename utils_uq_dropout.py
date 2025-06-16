@@ -91,6 +91,7 @@ class DropoutPINN(PINN):
         ic_loss_his = []
         data_loss_his = []
 
+        self.train()
         for ep in range(1, epochs + 1):
             opt.zero_grad()
 
@@ -104,18 +105,26 @@ class DropoutPINN(PINN):
             Y_pred = self.forward(X_train)
             loss_data = ((Y_pred - Y_train) ** 2).mean()
             loss = λ_data * loss_data
+            data_loss_his.append(loss_data.item())
+
             # PDE residual
             if hasattr(self.pde, 'residual'):
                 loss_pde = self.pde.residual(self, coloc_pt_num)
                 loss += λ_pde * loss_pde
+                pde_loss_his.append(loss_pde.item())
+
             # B.C. conditions
             if hasattr(self.pde, 'boundary_loss'):
                 loss_bc = self.pde.boundary_loss(self)
                 loss += λ_bc * loss_bc
+                bc_loss_his.append(loss_bc.item())
+
             # I.C. conditions
             if hasattr(self.pde, 'ic_loss'):
                 loss_ic = self.pde.ic_loss(self)
                 loss += λ_ic * loss_ic
+                ic_loss_his.append(loss_ic.item())
+                
             loss.backward()
             opt.step()
 
@@ -131,11 +140,10 @@ class DropoutPINN(PINN):
                       f"data={loss_data:.2e} | pde={loss_pde:.2e}  "
                       f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e}")
 
-                pde_loss_his.append(loss_pde.item())
-                bc_loss_his.append(loss_bc.item())
-                data_loss_his.append(loss_data.item())
 
-        return data_loss_his, ic_loss_his, bc_loss_his, pde_loss_his
+
+        return {"Data": data_loss_his, "Initial Condition Loss": ic_loss_his,
+                "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
     # -------------------------------------------------------------------------
     # Uncertainty-aware prediction

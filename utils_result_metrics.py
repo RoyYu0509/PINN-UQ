@@ -13,8 +13,9 @@ import torch.nn as nn
 import sklearn
 from sklearn.neighbors import NearestNeighbors
 from utils_uq_vi import VIBPINN
-
+from utils_uq_cp import CPPINN
 from scipy.stats import norm
+from utils_uq_dropout import DropoutPINN
 
 
 if torch.backends.mps.is_available():
@@ -66,8 +67,8 @@ def _sharpness(pred_set):
     return (upper - lower).mean().item()
 
 
-# Test coverage under different level of uncertainty
-def test_uncertainties(uqmodel, alphas, X_test, Y_test):
+# Test coverage for VI model under different level of uncertainty
+def vi_test_uncertainties(uqmodel, alphas, X_test, Y_test):
     """
         Evaluate uncertainty metrics (coverage and sharpness) over a range of alphas.
 
@@ -79,7 +80,6 @@ def test_uncertainties(uqmodel, alphas, X_test, Y_test):
         Returns:
             pandas.DataFrame with columns ["alpha", "coverage", "sharpness"]
     """
-    # Test VI model
     if isinstance(uqmodel, VIBPINN):
         results = []
 
@@ -101,20 +101,84 @@ def test_uncertainties(uqmodel, alphas, X_test, Y_test):
                 "coverage": coverage,
                 "sharpness": sha
             })
+        return pd.DataFrame(results)
 
     else:
-        results = []
+        raise ValueError("The given model must be VI BPINN")
 
+
+
+# Test CP model
+def cp_test_uncertainties(uqmodel, alphas, X_test, Y_test, X_cal, Y_cal, X_train, distance_space, k):
+    """
+    Test the given cp uq model, using different uq metrics
+    """
+    if isinstance(uqmodel, CPPINN):
+        results=[]
         for alpha in tqdm(alphas):
-            pred_set = uqmodel.predict(X_test, Y_test, alpha)
+            alpha_val = float(alpha)
+            if not (0.0 < alpha_val < 1.0):
+                raise ValueError("alpha must be in (0,1) for VI.")
+            pred_set = uqmodel.predict(alpha, k, X_test, X_cal, Y_cal, X_train, distance_space=distance_space)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
 
             results.append({
-                "alpha": alpha,
+                "alpha": alpha_val,
                 "coverage": coverage,
                 "sharpness": sha
             })
 
-    return pd.DataFrame(results)
+        return pd.DataFrame(results)
 
+    else:
+        raise ValueError("The given model must be CP PINN!")
+
+# Test Drop Out model
+def do_test_uncertainties(uqmodel, alphas, X_test, Y_test, n_samples):
+    """
+    Test the given drop-out uq model, using different uq metrics
+    """
+    if isinstance(uqmodel, DropoutPINN):
+        results=[]
+        for alpha in tqdm(alphas):
+            alpha_val = float(alpha)
+            if not (0.0 < alpha_val < 1.0):
+                raise ValueError("alpha must be in (0,1) for VI.")
+            pred_set = uqmodel.predict(X_test, n_samples, alpha)
+            coverage = _coverage(pred_set, Y_test)
+            sha = _sharpness(pred_set)
+
+            results.append({
+                "alpha": alpha_val,
+                "coverage": coverage,
+                "sharpness": sha
+            })
+
+        return pd.DataFrame(results)
+
+    else:
+        raise ValueError("The given model must be CP PINN!")
+
+
+# ------------------------------------------------------------------------------------
+def plot_uncertainty(pred_set, x_grid, title='Uncertainty Across Input Grid'):
+    """
+    Plot the uncertainty (interval width) over the grid.
+
+    Parameters:
+    - pred_set: tuple or list containing (lower_bounds, upper_bounds)
+    - x_grid: 1D array of x values (same length as pred_set[0] and pred_set[1])
+    """
+    lower_bounds = np.array(pred_set[0])
+    upper_bounds = np.array(pred_set[1])
+    uncertainty = (upper_bounds - lower_bounds)
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(x_grid, uncertainty, label='Uncertainty Width')
+    plt.xlabel('x')
+    plt.ylabel('Prediction Interval Width')
+    plt.title(title)
+    plt.grid(True)
+    plt.legend()
+    plt.show()

@@ -54,7 +54,8 @@ class PINN(DeterministicFeedForwardNN):
         self.pde = pde_class
 
     def fit_pinn(self,
-        X_train, Y_train, coloc_pt_num,
+        coloc_pt_num,
+        X_train, Y_train,
         λ_pde = 1.0, λ_ic = 10.0, λ_bc = 10.0, λ_data = 5.0,
         epochs = 20_000, lr = 3e-3, print_every = 500,
         scheduler_cls = StepLR, scheduler_kwargs = {'step_size': 5000, 'gamma': 0.5},
