@@ -152,7 +152,7 @@ class DropoutPINN(PINN):
     def predict(self,
                    x: torch.Tensor,
                    n_samples: int = 100,
-                   alpha: float = 0.05,
+                   alpha: torch.tensor = 0.05,
                    keep_dropout: bool = True,
                    return_samples: bool = False):
         """
@@ -182,7 +182,7 @@ class DropoutPINN(PINN):
 
         # Two-sided (1-alpha) Gaussian interval
         z = torch.tensor(
-            abs(torch.distributions.Normal(0,1).icdf(torch.tensor(alpha/2))),
+            abs(torch.distributions.Normal(0,1).icdf((alpha.detach().clone()/2))),
             device=preds.device, dtype=preds.dtype
         )
         lower = mean - z*std
