@@ -27,7 +27,7 @@ class BayesianFeedForwardNN(BasePINNModel):
         layers.append(BayesianLinear(prev_dim, output_dim, mu_std, rho, prior_std))
         self.layers = nn.ModuleList(layers)  # not using Sequential because it's a mix of custom and activations
 
-    def forward(self, x):
+    def forward(self, x, sample: bool = True):
         out = x
         for layer in self.layers:
             # [BL, act, BL, act, ..., act, BL] go through all the layers

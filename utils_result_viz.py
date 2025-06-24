@@ -191,3 +191,206 @@ def plot_expected_vs_empirical(df, alpha_col='alpha', cov_col='coverage', title=
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+def plot_dual_expected_vs_empirical(df_uncal, df_cal, 
+                                     alpha_col='alpha', cov_col='coverage',
+                                     title1='Uncalibrated Model', title2='Calibrated Model'):
+    """
+    Plots side-by-side coverage plots for uncalibrated and calibrated models.
+
+    Parameters:
+    - df_uncal: pd.DataFrame with alpha and coverage for the uncalibrated model
+    - df_cal: pd.DataFrame with alpha and coverage for the calibrated model
+    - alpha_col: column name for alpha values
+    - cov_col: column name for empirical coverage
+    - title1: title for the uncalibrated plot
+    - title2: title for the calibrated plot
+    """
+
+    def prepare_coverage_data(df):
+        expected = 1 - df[alpha_col]
+        empirical = df[cov_col]
+        expected_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])], ignore_index=True)
+        empirical_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])], ignore_index=True)
+        sorted_idx = expected_full.argsort()
+        return expected_full[sorted_idx], empirical_full[sorted_idx]
+
+    expected1, empirical1 = prepare_coverage_data(df_uncal)
+    expected2, empirical2 = prepare_coverage_data(df_cal)
+
+    # Create subplots
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+
+    # Plot uncalibrated
+    axes[0].plot(expected1, empirical1, marker='o', label='Empirical Coverage')
+    axes[0].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
+    axes[0].set_title(title1)
+    axes[0].set_xlabel("Expected Coverage (1 − α)")
+    axes[0].set_ylabel("Empirical Coverage")
+    axes[0].grid(True)
+    axes[0].legend()
+
+    # Plot calibrated
+    axes[1].plot(expected2, empirical2, marker='o', label='Empirical Coverage')
+    axes[1].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
+    axes[1].set_title(title2)
+    axes[1].set_xlabel("Expected Coverage (1 − α)")
+    axes[1].set_ylabel("Empirical Coverage")
+    axes[1].grid(True)
+    axes[1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+# 2D Visualizer
+def plot_predictions_2D(XY_test, pred_set, true_solution, title="2D UQ Result"):
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    x = XY_test[:, 0].detach().cpu().numpy()
+    y = XY_test[:, 1].detach().cpu().numpy()
+    lower_np = pred_set[0].detach().cpu().numpy().flatten()
+    upper_np = pred_set[1].detach().cpu().numpy().flatten()
+    mean_np = (lower_np + upper_np) / 2.0
+
+    true_np = true_solution(XY_test).detach().cpu().numpy().flatten()
+
+    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+    for ax, data, title_sub in zip(
+        axs,
+        [true_np, mean_np, upper_np - lower_np],
+        ["True u(x,y)", "Predicted Mean", "Predictive Interval Width"]
+    ):
+        sc = ax.tricontourf(x, y, data, levels=100)
+        fig.colorbar(sc, ax=ax)
+        ax.set_title(f"{title}: {title_sub}")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+def plot_predictions_2D_compare(
+    XY_test,
+    pred_set_uncal,
+    pred_set_cal,
+    true_solution,
+    title="2D UQ Result",
+    vlim_true=None,  # Customized range for the color grid
+    vlim_pred_mean=None,
+    vlim_pred_width=None
+):
+    """
+    Plots 2D prediction comparison with optional fixed color ranges.
+    
+    Args:
+        XY_test: Tensor of shape (N, 2)
+        pred_set_uncal: Tuple (lower, upper) from uncalibrated model
+        pred_set_cal: Tuple (lower, upper) from calibrated model
+        true_solution: Callable true u(x,y)
+        vlim_true: tuple (vmin, vmax) or None — color range for true u(x,y)
+        vlim_pred_mean: tuple (vmin, vmax) or None — color range for predicted means
+        vlim_pred_width: tuple (vmin, vmax) or None — color range for interval widths
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
+
+    # Extract test points
+    x = XY_test[:, 0].detach().cpu().numpy()
+    y = XY_test[:, 1].detach().cpu().numpy()
+
+    # Generate grid for true solution
+    grid_size = 100
+    x_lin = np.linspace(x.min(), x.max(), grid_size)
+    y_lin = np.linspace(y.min(), y.max(), grid_size)
+    X_grid, Y_grid = np.meshgrid(x_lin, y_lin)
+    XY_grid = torch.tensor(np.stack([X_grid.flatten(), Y_grid.flatten()], axis=1), dtype=XY_test.dtype)
+
+    # True solution on grid
+    true_np_grid = true_solution(XY_grid).detach().cpu().numpy().reshape(grid_size, grid_size)
+
+    # Helper for prediction intervals
+    def prepare(pred_set):
+        lower_np = pred_set[0].detach().cpu().numpy().flatten()
+        upper_np = pred_set[1].detach().cpu().numpy().flatten()
+        mean_np = (lower_np + upper_np) / 2.0
+        width_np = upper_np - lower_np
+        return mean_np, width_np
+
+    mean_uncal, width_uncal = prepare(pred_set_uncal)
+    mean_cal, width_cal = prepare(pred_set_cal)
+
+    # Plot setup
+    fig, axs = plt.subplots(2, 3, figsize=(18, 10))
+
+    # ─────────────── True Solution ───────────────
+    for row in range(2):
+        ax = axs[row, 0]
+        im = ax.contourf(
+            X_grid, Y_grid, true_np_grid, levels=100,
+            vmin=None if vlim_true is None else vlim_true[0],
+            vmax=None if vlim_true is None else vlim_true[1]
+        )
+        fig.colorbar(im, ax=ax)
+        ax.set_title(f"{title}: True u(x,y)")
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+
+    # ─────────────── Uncalibrated ───────────────
+    ax = axs[0, 1]
+    im = ax.tricontourf(
+        x, y, mean_uncal, levels=100,
+        vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
+        vmax=None if vlim_pred_mean is None else vlim_pred_mean[1]
+    )
+    fig.colorbar(im, ax=ax)
+    ax.set_title(f"{title}: Predicted Mean (Uncalibrated)")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    ax = axs[0, 2]
+    im = ax.tricontourf(
+        x, y, width_uncal, levels=100,
+        vmin=None if vlim_pred_width is None else vlim_pred_width[0],
+        vmax=None if vlim_pred_width is None else vlim_pred_width[1]
+    )
+    fig.colorbar(im, ax=ax)
+    ax.set_title(f"{title}: Interval Width (Uncalibrated)")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    # ─────────────── Calibrated ───────────────
+    ax = axs[1, 1]
+    im = ax.tricontourf(
+        x, y, mean_cal, levels=100,
+        vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
+        vmax=None if vlim_pred_mean is None else vlim_pred_mean[1]
+    )
+    fig.colorbar(im, ax=ax)
+    ax.set_title(f"{title}: Predicted Mean (Calibrated)")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    ax = axs[1, 2]
+    im = ax.tricontourf(
+        x, y, width_cal, levels=100,
+        vmin=None if vlim_pred_width is None else vlim_pred_width[0],
+        vmax=None if vlim_pred_width is None else vlim_pred_width[1]
+    )
+    fig.colorbar(im, ax=ax)
+    ax.set_title(f"{title}: Interval Width (Calibrated)")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    plt.tight_layout()
+    plt.show()

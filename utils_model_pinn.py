@@ -20,7 +20,7 @@ print(f"Using device: {device}")
 
 
 class DeterministicFeedForwardNN(BasePINNModel):
-    """Feed-forward neural network with Bayesian linear layers (for VI)."""
+    """Feed-forward neural network with Deterministic linear layers (for VI)."""
     def __init__(self, input_dim, hidden_dims, output_dim, act_func=nn.Tanh()):
         super().__init__()
         if isinstance(hidden_dims, int):

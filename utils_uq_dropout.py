@@ -8,7 +8,7 @@ from utils_layer_DeterministicLinearLayer import DeterministicLinear
 #  1.  Feed-forward network that inserts Drop-out after every deterministic layer
 # ───────────────────────────────────────────────────────────────────────────────
 
-class DeterministicDropoutNN(BasePINNModel):
+class DeterministicDropoutNN(nn.Module):
     """
     Fully–connected network identical to DeterministicFeedForwardNN,
     but each hidden block is Linear ▸ Dropout ▸ Activation.
@@ -47,7 +47,7 @@ class DeterministicDropoutNN(BasePINNModel):
 #  2.  PINN wrapper with the standard physics losses *plus* MC-Drop-out UQ
 # ───────────────────────────────────────────────────────────────────────────────
 
-class DropoutPINN(PINN):
+class DropoutPINN(nn.Module):
     """
     Physics-Informed Neural Network with Monte-Carlo Drop-out for UQ.
 
@@ -62,13 +62,15 @@ class DropoutPINN(PINN):
                  output_dim: int,
                  p_drop: float = 0.1,
                  activation = nn.Tanh()):
-        # Register backbone parameters inside BasePINNModel
-        super(PINN, self).__init__(input_dim, hidden_dims, output_dim)  # skip PINN.__init__, call one level up
-        # Build backbone with dropout layers
-        self.backbone = DeterministicDropoutNN(input_dim, hidden_dims,
-                                               output_dim, p_drop, activation)
-        self.__dict__.update(self.backbone.__dict__)  # merge state (quick hack)
+        super().__init__()
+        # Pure neural net part
+        self.net = DeterministicDropoutNN(input_dim, hidden_dims,
+                                          output_dim, p_drop, activation)
         self.pde = pde_class               # physics callbacks
+
+    # Register backbone as a sub-module (it already is because of the attr)
+    def forward(self, x):
+        return self.net(x)
 
     def fit_do_pinn(self,
                  coloc_pt_num,
@@ -77,7 +79,8 @@ class DropoutPINN(PINN):
                  epochs=20_000, lr=3e-3, print_every=500,
                  scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
                  stop_schedule=40000):
-
+        
+        device = X_train.device
         # move model to device
         self.to(device)
         # Optimizer
@@ -150,19 +153,17 @@ class DropoutPINN(PINN):
     # -------------------------------------------------------------------------
     @torch.inference_mode()
     def predict(self,
-                   x: torch.Tensor,
-                   n_samples: int = 100,
-                   alpha: torch.tensor = 0.05,
-                   keep_dropout: bool = True,
-                   return_samples: bool = False):
+                alpha: float,
+                X_test: torch.tensor,
+                n_samples: int = 100,
+                keep_dropout: bool = True):
         """
         Parameters
         ----------
-        x : (N, d_in) tensor on same device / dtype as model
+        X_test : (N, d_in) tensor on same device / dtype as model
         n_samples : number of MC forward passes
         alpha : 1 – confidence level; alpha=0.05 → 95 % interval
         keep_dropout : if True, forces dropout active during inference
-        return_samples : if True, also returns the raw (n_samples, N, out) tensor
 
         Returns
         -------
@@ -171,25 +172,24 @@ class DropoutPINN(PINN):
         bounds: (lower, upper) each shape (N, out)
         """
         if keep_dropout:
+            self.train()
             self.enable_mc_dropout()
 
         preds = []
         for _ in range(n_samples):
-            preds.append(self.forward(x))
+            preds.append(self.forward(X_test))
         preds = torch.stack(preds)                         # (S, N, out)
         mean = preds.mean(0)
         std  = preds.std(0)
 
         # Two-sided (1-alpha) Gaussian interval
         z = torch.tensor(
-            abs(torch.distributions.Normal(0,1).icdf((alpha.detach().clone()/2))),
+            abs(torch.distributions.Normal(0,1).icdf(torch.tensor(alpha/2))),
             device=preds.device, dtype=preds.dtype
         )
         lower = mean - z*std
         upper = mean + z*std
 
-        if return_samples:
-            return (lower, upper)
         return (lower, upper)
 
     # -------------------------------------------------------------------------

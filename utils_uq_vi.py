@@ -46,7 +46,7 @@ class VIBPINN(BayesianFeedForwardNN):
         pde_loss_his = []
         bc_loss_his = []
         ic_loss_his = []
-        data_loss_his = []
+        nelbo_loss_his = []
 
         # Check which losses the PDE provides
         has_residue_l = hasattr(self.pde, 'residual')
@@ -76,7 +76,7 @@ class VIBPINN(BayesianFeedForwardNN):
 
             # Negative ELBO
             n_elbo = loss_data + kl_div
-            data_loss_his.append(n_elbo.item())
+            nelbo_loss_his.append(n_elbo.item())
 
             # PDE residual loss (if applicable)
             if has_residue_l:
@@ -111,21 +111,27 @@ class VIBPINN(BayesianFeedForwardNN):
                     elif isinstance(scheduler, StepLR):
                         scheduler.step()
 
-        return {"ELBO": data_loss_his, "Initial Condition Loss": ic_loss_his,
+        return {"ELBO": nelbo_loss_his, "Initial Condition Loss": ic_loss_his,
                 "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
-    def predict(self, x_test, n_samples=100, z_score=1.96):
+    def predict(self, alpha, X_test, n_samples=5000):
         """Draw samples from the variational posterior and return prediction bounds
         with configurable confidence level."""
         self.eval()
         preds = []
         for _ in range(n_samples):
-            y_pred = self.forward(x_test)
+            y_pred = self.forward(X_test)
             preds.append(y_pred.detach())
         preds = torch.stack(preds)
 
         mean = preds.mean(dim=0)
         std = preds.std(dim=0)
+
+        # Convert alpha value to z_score
+        z_score = torch.tensor(
+            abs(torch.distributions.Normal(0,1).icdf(torch.tensor(alpha/2))),
+            device=preds.device, dtype=preds.dtype
+        )
 
         lower_bound = mean - z_score * std
         upper_bound = mean + z_score * std

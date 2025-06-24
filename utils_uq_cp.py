@@ -1,299 +1,142 @@
-from utils_layer_DeterministicLinearLayer import DeterministicLinear
-from utils_model_pinn import PINN
-import torch
-import torch.nn as nn
-from sklearn.neighbors import NearestNeighbors
-from interface_model import BasePINNModel
-
-import torch
-import torch.nn as nn
-import math
-from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
-from utils_layer_DeterministicLinearLayer import DeterministicLinear
-
+# ─────────────────────────────────────────────────────────────────────
+#  🆕  Conformal Predictor (CP) – drop-in replacement
+# ─────────────────────────────────────────────────────────────────────
 import numpy as np
+from numpy import random
+import torch
+from sklearn.neighbors import NearestNeighbors
 
 
-if torch.backends.mps.is_available():
-    device = torch.device("mps")  # Apple Silicon GPU (M1/M2/M3)
-elif torch.cuda.is_available():
-    device = torch.device("cuda")  # NVIDIA GPU
-else:
-    device = torch.device("cpu")   # Fallback to CPU
-
-device = torch.device("cpu")
-torch.set_default_device(device)
-print(f"Using device: {device}")
+# 🔹 tiny helper: robust Torch/NumPy conversion
+def _to_numpy(x):
+    """Return a NumPy array regardless of whether *x* is Tensor or ndarray."""
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return np.asarray(x)
 
 
-class CPPINN(nn.Module):
-    def __init__(self, pde_class, input_dim, hidden_dims, output_dim, act_cls=nn.Tanh):
-        super().__init__()
-        # Ensure hidden_dims is a list
-        if isinstance(hidden_dims, int):
-            hidden_dims = [hidden_dims]
+class CP:
+    """
+    Conformal predictor wrapper supporting three heuristics:
+      • 'feature'  – k-NN distance in input space
+      • 'latent'   – k-NN distance in hidden space (model must return_hidden=True)
+      • 'raw_std'  – raw predictive interval width from the model itself
+    """
 
-        self.act = act_cls()  # store activation once
-        self.input_layer = DeterministicLinear(input_dim, hidden_dims[0])
+    def __init__(self, model, device=None):
+        self.model  = model
+        self.device = device or next(model.parameters()).device
+        # 1️⃣ put the model in eval mode once and for all
+        self.model.eval()
 
-        # All *intermediate* hidden linear layers
-        inner_layers = []
-        prev_dim = hidden_dims[0]
-        for h in hidden_dims[1:]:
-            inner_layers.append(DeterministicLinear(prev_dim, h))
-            prev_dim = h
-        self.hidden_layers = nn.ModuleList(inner_layers)
-
-        # Final output layer
-        self.output_layer = DeterministicLinear(prev_dim, output_dim)
-        self.pde = pde_class
-
-    def forward(self, x, return_hidden=False):
-        x = self.act(self.input_layer.forward(x))  # first layer + act
-
-        for layer in self.hidden_layers:  # all remaining hidden layers
-            x = self.act(layer(x))
-
-        hidden = x  # last hidden representation
-        out = self.output_layer.forward(hidden)  # logits / regression output
-
-        return (out, hidden) if return_hidden else out
-
-
-
-    def fit_cp_pinn(self,
-                 coloc_pt_num,
-                 X_train, Y_train,
-                 λ_pde=1.0, λ_ic=10.0, λ_bc=10.0, λ_data=5.0,
-                 epochs=20_000, lr=3e-3, print_every=500,
-                 scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
-                 stop_schedule=40000):
-
-        # move model to device
-        self.to(device)
-        # Optimizer
-        opt = torch.optim.Adam(self.parameters(), lr=lr)
-        # Scheduler
-        scheduler = scheduler_cls(opt, **scheduler_kwargs) if scheduler_cls else None
-
-        # Training History
-        pde_loss_his = []
-        bc_loss_his = []
-        ic_loss_his = []
-        data_loss_his = []
-
-        for ep in range(1, epochs + 1):
-            opt.zero_grad()
-
-            # Init them as 0
-            loss_data = 0
-            loss_pde = 0
-            loss_bc = 0
-            loss_ic = 0
-
-            # Data loss
-            Y_pred = self.forward(X_train)
-            loss_data = ((Y_pred - Y_train) ** 2).mean()
-            loss = λ_data * loss_data
-            data_loss_his.append(loss_data.item())
-
-            # PDE residual
-            if hasattr(self.pde, 'residual'):
-                loss_pde = self.pde.residual(self, coloc_pt_num)
-                loss += λ_pde * loss_pde
-                pde_loss_his.append(loss_pde.item())
-            # B.C. conditions
-            if hasattr(self.pde, 'boundary_loss'):
-                loss_bc = self.pde.boundary_loss(self)
-                loss += λ_bc * loss_bc
-
-                bc_loss_his.append(loss_bc.item())
-
-            # I.C. conditions
-            if hasattr(self.pde, 'ic_loss'):
-                loss_ic = self.pde.ic_loss(self)
-                loss += λ_ic * loss_ic
-
-                ic_loss_his.append(loss_ic.item())
-            loss.backward()
-            opt.step()
-
-            if ep <= stop_schedule:  # Stop decreasing the learning rate
-                if scheduler:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        scheduler.step(loss.item())
-                    elif isinstance(scheduler, StepLR):
-                        scheduler.step()
-
-            if (ep % print_every == 0 or ep == 1):  # Only start reporting after the warm-up Phase
-                print(f"ep {ep:5d} | L={loss:.2e} | "
-                      f"data={loss_data:.2e} | pde={loss_pde:.2e}  "
-                      f"ic={loss_ic:.2e}  bc={loss_bc:.2e} | lr={opt.param_groups[0]['lr']:.2e}")
-
-        return {"Data": data_loss_his, "Initial Condition Loss": ic_loss_his,
-                "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
-
-    ######################## Feature Space Distance ############################
-    # Compute the uncertainty as distance in the original feature space
+    # ════════════════════════════════════════════════════════════════
+    # 1️⃣  k-NN helper functions
+    # ════════════════════════════════════════════════════════════════
     def _feature_distance(self, X_cal, X_train, k):
-        # Use sklearn to compute kNN distances in the feature space
-        nbrs = NearestNeighbors(n_neighbors=k, algorithm='auto').fit(X_train)
+        X_cal   = _to_numpy(X_cal)
+        X_train = _to_numpy(X_train)
+        nbrs = NearestNeighbors(n_neighbors=k).fit(X_train)
         distances, _ = nbrs.kneighbors(X_cal)
+        return distances.mean(axis=1)               # (N_cal,)
 
-        avg_dists = np.mean(distances, axis=1)
-        return avg_dists  # 每一个 calibration point 的 heuristic uncertainty
-
-    def _conf_metric_feature(self, X_cal, Y_cal, X_train, k=10, eps=1e-8):
-        """
-        Scaled residual score  s_i = |y_i − ŷ_i| / d_i   (vector-valued)
-
-        Parameters:
-            - X_cal, Y_cal, X_train: the training data
-            - k: the number nearest neighbour.
-            - eps: the lower bound to prevent if the calibration point
-                being too close to its neibouring training data point, leading
-                to blowing up conformal score.
-        """
-        X_cal_tensor = X_cal.detach().clone().requires_grad_(True).to(device)
-
-        # ---> remove the stray [0] so we predict *all* N calibration points
-        with torch.no_grad():
-            Y_pred = self.forward(X_cal_tensor).cpu().numpy()  # shape (N, out_dim)
-
-        raw_residual = np.abs(Y_cal - Y_pred)  # (N, out_dim)
-
-        # k-NN distance in the *feature* (input) space – unchanged
-        latent_dist = self._feature_distance(X_cal, X_train, k=k)  # (N,)
-
-        # ---> prevent divide-by-zero / tiny-distance conformal score blow-ups
-        latent_dist = np.maximum(latent_dist, eps)
-
-        scaled_score = raw_residual / latent_dist[:, None]  # (N, out_dim)
-        return scaled_score, latent_dist
-
-    ##############################################################################
-
-    ######################### Latent Space Distance ##############################
     def _latent_distance(self, X_cal, X_train, k):
-        """
-        Compute the average distance from each calibration point to its k nearest neighbors
-        from the training set in the latent space.
-        """
-        self.eval()
+        self.model.eval()
         with torch.no_grad():
-            H_cal = self.forward(X_cal.detach().clone().requires_grad_(True).to(device), return_hidden=True)[
-                1].clone().detach().cpu().numpy()
-            H_train = self.forward(X_train.detach().clone().requires_grad_(True).to(device), return_hidden=True)[
-                1].clone().detach().cpu().numpy()
-
-        # Use sklearn to compute kNN distances in latent space
-        nbrs = NearestNeighbors(n_neighbors=k, algorithm='auto').fit(H_train)
+            H_cal = self.model(X_cal.to(self.device),   return_hidden=True)[1]
+            H_trn = self.model(X_train.to(self.device), return_hidden=True)[1]
+        H_cal   = _to_numpy(H_cal)
+        H_trn   = _to_numpy(H_trn)
+        nbrs = NearestNeighbors(n_neighbors=k).fit(H_trn)
         distances, _ = nbrs.kneighbors(H_cal)
+        return distances.mean(axis=1)
 
-        avg_dists = np.mean(distances, axis=1)
-        return avg_dists  # 每一个 calibration point 的 heuristic uncertainty
+    # ════════════════════════════════════════════════════════════════
+    # 2️⃣  Raw predictive width
+    # ════════════════════════════════════════════════════════════════
+    def _rawstd(self, alpha, X):
+        """Return (upper-lower) from the model’s own `predict` method."""
+        self.model.eval()
+        pred_set = self.model.predict(alpha, X)
+        width = (pred_set[1] - pred_set[0]).squeeze(-1)    # (N,)
+        return _to_numpy(width)
 
-    def _conf_metric_latent(self, X_cal, Y_cal, X_train, k=10, eps=1e-8):
-        """
-        Scaled residual score  s_i = |y_i − ŷ_i| / d_i   (vector-valued)
-
-        Parameters:
-            - X_cal, Y_cal, X_train: the training data
-            - k: the number nearest neighbour.
-            - eps: the lower bound to prevent if the calibration point
-                being too close to its neibouring training data point, leading
-                to blowing up conformal score.
-        """
-        X_cal_tensor = torch.tensor(X_cal, dtype=torch.float32, device=device)
-
-        # ---> remove the stray [0] so we predict *all* N calibration points
+    # ════════════════════════════════════════════════════════════════
+    # 3️⃣  Conformal scores on the *calibration* set
+    # ════════════════════════════════════════════════════════════════
+    def _conf_metric_feature(self, X_cal, Y_cal, X_train, k, eps=1e-8):
         with torch.no_grad():
-            Y_pred = self.forward(X_cal_tensor).cpu().numpy()  # shape (N, out_dim)
+            Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
+        residual   = np.abs(Y_cal - Y_pred)                # (N_cal, out_dim)
+        dist_feat  = np.maximum(self._feature_distance(X_cal, X_train, k), eps)
+        return residual / dist_feat[:, None]               # (N_cal, out_dim)
 
-        raw_residual = np.abs(Y_cal - Y_pred)  # (N, out_dim)
-
-        # k-NN distance in the *feature* (input) space – unchanged
-        latent_dist = self._latent_distance(X_cal, X_train, k=k)  # (N,)
-
-        # ---> prevent divide-by-zero / tiny-distance conformal score blow-ups
-        latent_dist = np.maximum(latent_dist, eps)
-
-        scaled_score = raw_residual / latent_dist[:, None]  # (N, out_dim)
-        return scaled_score, latent_dist
-
-    ##############################################################################
-
-    def predict(self, alpha, k, X_test, X_cal, Y_cal, X_train, distance_space):
-        """
-        Implements conformal prediction with latent-space-scaled residuals
-        """
-        n = len(X_cal)
-
-        if distance_space == "feature":
-            conf_metric_func = self._conf_metric_feature
-            distance_func = self._feature_distance
-        elif distance_space == "latent":
-            conf_metric_func = self._conf_metric_latent
-            distance_func = self._latent_distance
-        else:
-            raise ValueError("Choose one of the distance measuring methods: feature/latent")
-
-        # Step 1: Scaled scores on calibration set
-        cal_scores, _ = conf_metric_func(X_cal, Y_cal, X_train, k=k)
-        qhat = np.quantile(cal_scores, np.ceil((n + 1) * (1 - alpha)) / n, axis=0, method="higher")
-
-        # Step 2: Predict and get latent distances for test set
+    def _conf_metric_latent(self, X_cal, Y_cal, X_train, k, eps=1e-8):
         with torch.no_grad():
-            y_pred_test, _ = self.forward(X_test.detach().clone().requires_grad_(True), return_hidden=True)
-            y_pred_test = y_pred_test.cpu().numpy()
-            test_dists = distance_func(X_test, X_train, k)
+            Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
+        residual   = np.abs(Y_cal - Y_pred)
+        dist_lat   = np.maximum(self._latent_distance(X_cal, X_train, k), eps)
+        return residual / dist_lat[:, None]
 
-        # Step 3: Prediction intervals
-        eps = qhat * test_dists[:, None]  # shape: [n_test, output_dim]
-        lower = y_pred_test - eps
-        upper = y_pred_test + eps
-        lower = torch.tensor(lower, dtype=torch.float32).to(device)
-        upper = torch.tensor(upper, dtype=torch.float32).to(device)
+    def _conf_metric_rawstd(self, alpha, X_cal, Y_cal, X_train, eps=1e-8):
+        with torch.no_grad():
+            Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
+        residual   = np.abs(Y_cal - Y_pred)
+        width      = np.maximum(self._rawstd(alpha, X_cal), eps)    # (N_cal,)
+        assert residual.shape[0] == width.shape[0], "Residual/width length mismatch"
+        return residual / width[:, None]
 
-        return [lower, upper]
-
-    #####################################################################
-    def naive_predict(self, k, X_test, Y_test, X_train, Y_train, device="cpu", factor: float = 3.0):
+    # ════════════════════════════════════════════════════════════════
+    # 4️⃣  Public API
+    # ════════════════════════════════════════════════════════════════
+    def predict(
+        self, alpha,
+        X_test,  X_train,  Y_train,
+        X_cal,   Y_cal,
+        heuristic_u="feature",
+        k=10
+    ):
         """
-        Heuristic UQ via k-NN sample variance.
-
         Parameters
         ----------
-        X_test, Y_test : np.ndarray  – test inputs / true targets
-        X_train, Y_train : np.ndarray  – training inputs / targets
-        factor : float  – scale-up factor for the error band (default = 1.0)
-
-        Returns
-        -------
-        bounds : [lower, upper]  – arrays with the same shape as Y_test
+        alpha : float      desired mis-coverage (e.g. 0.05)
+        heuristic_u : str  'feature' | 'latent' | 'raw_std'
+        k : int            nearest-neighbour count for k-NN heuristics
         """
+        # 0️⃣  deterministic run
+        torch.manual_seed(0); np.random.seed(0); random.seed(0)
+        torch.use_deterministic_algorithms(True)
+        self.model.eval()
 
-        # ----- 1. model mean prediction on the test set -----
-        self.eval()
+        # --- choose conformity metric ----------------------------------------
+        if heuristic_u == "feature":
+            cal_scores = self._conf_metric_feature(X_cal, Y_cal, X_train, k)
+            test_u     = self._feature_distance(X_test, X_train, k)
+        elif heuristic_u == "latent":
+            cal_scores = self._conf_metric_latent(X_cal, Y_cal, X_train, k)
+            test_u     = self._latent_distance(X_test, X_train, k)
+        elif heuristic_u == "raw_std":
+            cal_scores = self._conf_metric_rawstd(alpha, X_cal, Y_cal, X_train)
+            test_u     = self._rawstd(alpha, X_test)
+        else:
+            raise ValueError("heuristic_u must be 'feature', 'latent' or 'raw_std'")
+
+        # --- quantile on calibration scores ----------------------------------
+        n_cal = cal_scores.shape[0]
+        q_hat = np.quantile(
+            cal_scores,
+            np.ceil((n_cal + 1) * (1 - alpha)) / n_cal,
+            axis=0,
+            method="higher"
+        )                                                # (out_dim,)
+
+        # --- point predictions on X_test --------------------------------------
         with torch.no_grad():
-            y_pred = self.forward(
-                torch.as_tensor(X_test, dtype=torch.float32, device=device)
-            ).cpu().numpy()  # shape (n_test, out_dim)
+            self.model.eval()
+            y_pred_test = self.model(X_test.to(self.device)).cpu().numpy()
 
-        # ----- 2. k-nearest neighbours in input space -----
-        k = k
-        nbrs = NearestNeighbors(n_neighbors=k, algorithm="auto").fit(X_train)
-        _, idx = nbrs.kneighbors(X_test)  # idx: (n_test, k)
-
-        # ----- 3. local sample variance of neighbour targets -----
-        neigh_targets = Y_train[idx]  # (n_test, k, out_dim)
-        # unbiased variance; fall back to 0 when k == 1
-        var_local = np.var(neigh_targets, axis=1, ddof=1 if k > 1 else 0)
-        sigma_local = np.sqrt(var_local) * factor  # (n_test, out_dim)
-
-        # ----- 4. prediction bands -----
-        lower = y_pred - sigma_local
-        upper = y_pred + sigma_local
+        # --- build intervals --------------------------------------------------
+        eps  = q_hat * test_u[:, None]                   # (N_test, out_dim)
+        lower = torch.as_tensor(y_pred_test - eps, device=self.device, dtype=torch.float32)
+        upper = torch.as_tensor(y_pred_test + eps, device=self.device, dtype=torch.float32)
 
         return [lower, upper]
-

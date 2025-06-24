@@ -13,7 +13,9 @@ import torch.nn as nn
 import sklearn
 from sklearn.neighbors import NearestNeighbors
 from utils_uq_vi import VIBPINN
-from utils_uq_cp import CPPINN
+from utils_uq_mlp import MLPPINN
+from utils_uq_cp import CP
+
 from scipy.stats import norm
 from utils_uq_dropout import DropoutPINN
 
@@ -83,16 +85,11 @@ def vi_test_uncertainties(uqmodel, alphas, X_test, Y_test):
     if isinstance(uqmodel, VIBPINN):
         results = []
 
-        def miscoverage_to_z(alpha):  # alpha in (0,1)
-            return norm.ppf(1 - alpha / 2)
-
         for alpha in tqdm(alphas):
             alpha_val = float(alpha.item())
             if not (0.0 < alpha_val < 1.0):
                 raise ValueError("alpha must be in (0,1) for VI.")
-            z = miscoverage_to_z(alpha_val)
-            z = torch.tensor(z, dtype=torch.float32, device=X_test.device)
-            pred_set = uqmodel.predict(X_test, n_samples=100, z_score=z)
+            pred_set = uqmodel.predict(alpha, X_test, n_samples=100)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
 
@@ -107,32 +104,31 @@ def vi_test_uncertainties(uqmodel, alphas, X_test, Y_test):
         raise ValueError("The given model must be VI BPINN")
 
 
-
 # Test CP model
-def cp_test_uncertainties(uqmodel, alphas, X_test, Y_test, X_cal, Y_cal, X_train, distance_space, k):
+def cp_test_uncertainties(uqmodel, alphas, X_test, Y_test, X_cal, Y_cal, X_train, Y_train, heuristic_u, k=10):
     """
     Test the given cp uq model, using different uq metrics
     """
-    if isinstance(uqmodel, CPPINN):
-        results=[]
-        for alpha in tqdm(alphas):
-            alpha_val = float(alpha)
-            if not (0.0 < alpha_val < 1.0):
-                raise ValueError("alpha must be in (0,1) for VI.")
-            pred_set = uqmodel.predict(alpha, k, X_test, X_cal, Y_cal, X_train, distance_space=distance_space)
-            coverage = _coverage(pred_set, Y_test)
-            sha = _sharpness(pred_set)
+    # if isinstance(uqmodel, CP):
+    results=[]
+    for alpha in tqdm(alphas):
+        alpha_val = float(alpha)
+        if not (0.0 < alpha_val < 1.0):
+            raise ValueError("alpha must be in (0,1) for VI.")
+        pred_set = uqmodel.predict(alpha, X_test,  X_train,  Y_train, X_cal, Y_cal, heuristic_u=heuristic_u, k=k)
+        coverage = _coverage(pred_set, Y_test)
+        sha = _sharpness(pred_set)
 
-            results.append({
-                "alpha": alpha_val,
-                "coverage": coverage,
-                "sharpness": sha
-            })
+        results.append({
+            "alpha": alpha_val,
+            "coverage": coverage,
+            "sharpness": sha
+        })
 
-        return pd.DataFrame(results)
+    return pd.DataFrame(results)
 
-    else:
-        raise ValueError("The given model must be CP PINN!")
+    # else:
+    #     raise ValueError("The given model must be CP PINN!")
 
 # Test Drop Out model
 def do_test_uncertainties(uqmodel, alphas, X_test, Y_test, n_samples):
@@ -145,7 +141,7 @@ def do_test_uncertainties(uqmodel, alphas, X_test, Y_test, n_samples):
             alpha_val = float(alpha)
             if not (0.0 < alpha_val < 1.0):
                 raise ValueError("alpha must be in (0,1) for VI.")
-            pred_set = uqmodel.predict(X_test, n_samples, alpha)
+            pred_set = uqmodel.predict(alpha, X_test, n_samples,)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
 
