@@ -72,13 +72,16 @@ class DropoutPINN(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-    def fit_do_pinn(self,
-                 coloc_pt_num,
-                 X_train, Y_train,
-                 λ_pde=1.0, λ_ic=10.0, λ_bc=10.0, λ_data=5.0,
-                 epochs=20_000, lr=3e-3, print_every=500,
-                 scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
-                 stop_schedule=40000):
+    def fit(self,
+        # ------------ args ----------------
+        coloc_pt_num,
+        X_train, Y_train,
+        # ----------- kwargs ---------------
+        λ_pde=1.0, λ_ic=10.0, λ_bc=10.0, λ_data=5.0,
+        epochs=20_000, lr=3e-3, print_every=500,
+        scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
+        stop_schedule=40000
+        ):
         
         device = X_train.device
         # move model to device
@@ -151,26 +154,16 @@ class DropoutPINN(nn.Module):
     # -------------------------------------------------------------------------
     # Uncertainty-aware prediction
     # -------------------------------------------------------------------------
+    # Dropout Model
     @torch.inference_mode()
-    def predict(self,
-                alpha: float,
-                X_test: torch.tensor,
-                n_samples: int = 100,
-                keep_dropout: bool = True):
-        """
-        Parameters
-        ----------
-        X_test : (N, d_in) tensor on same device / dtype as model
-        n_samples : number of MC forward passes
-        alpha : 1 – confidence level; alpha=0.05 → 95 % interval
-        keep_dropout : if True, forces dropout active during inference
-
-        Returns
-        -------
-        mean  : (N, out)
-        std   : (N, out)
-        bounds: (lower, upper) each shape (N, out)
-        """
+    def predict(
+        # ------------ args ---------------
+        self, alpha,
+        X_test,  
+        # ----------- kwargs ---------------
+        n_samples: int = 100,
+        keep_dropout: bool = True
+    ):
         if keep_dropout:
             self.train()
             self.enable_mc_dropout()

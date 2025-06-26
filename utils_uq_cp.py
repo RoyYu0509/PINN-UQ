@@ -89,9 +89,12 @@ class CP:
     # 4️⃣  Public API
     # ════════════════════════════════════════════════════════════════
     def predict(
+        # ------------ args ---------------
         self, alpha,
-        X_test,  X_train,  Y_train,
-        X_cal,   Y_cal,
+        X_test,  
+        # ----------- kwargs ---------------
+        X_train=None,  Y_train=None,
+        X_cal=None,   Y_cal=None,
         heuristic_u="feature",
         k=10
     ):

@@ -29,14 +29,18 @@ class VIBPINN(BayesianFeedForwardNN):
         else:
             self.log_noise = torch.tensor(math.log(init_data_noise), dtype=torch.float32)
 
-
-    def fit_vi_bpinn(self,
+    # Variational Inference Model
+    def fit(self,
+        # ------------ args ----------------
         coloc_pt_num,
         X_train=torch.tensor, Y_train=torch.tensor,
+        # ----------- kwargs --------------- 
         λ_pde=1.0, λ_ic=1.0, λ_bc=1.0, λ_elbo=1.0, λ_data=1.0,
         epochs=20_000, lr=3e-3,
         scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
-        stop_schedule=40000):
+        stop_schedule=40000
+    ):
+
         # Optimizer: note that self.log_noise is included among the parameters.
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         # Scheduler
@@ -114,7 +118,14 @@ class VIBPINN(BayesianFeedForwardNN):
         return {"ELBO": nelbo_loss_his, "Initial Condition Loss": ic_loss_his,
                 "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
-    def predict(self, alpha, X_test, n_samples=5000):
+    # Variational Inference
+    def predict(
+        # ------------ args ---------------
+        self, alpha,
+        X_test,  
+        # ----------- kwargs --------------- 
+        n_samples=5000
+    ):
         """Draw samples from the variational posterior and return prediction bounds
         with configurable confidence level."""
         self.eval()

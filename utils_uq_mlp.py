@@ -60,14 +60,17 @@ class MLPPINN(nn.Module):
         return (out, hidden) if return_hidden else out
 
 
-
-    def fit_mlp_pinn(self,
-                 coloc_pt_num,
-                 X_train, Y_train,
-                 λ_pde=1.0, λ_ic=5.0, λ_bc=5.0, λ_data=1.0,
-                 epochs=20_000, lr=3e-3, print_every=500,
-                 scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
-                 stop_schedule=40000):
+    # MLP Model
+    def fit(self,
+        # ------------ args ----------------
+        coloc_pt_num,
+        X_train, Y_train,
+        # ----------- kwargs ---------------
+        λ_pde=1.0, λ_ic=5.0, λ_bc=5.0, λ_data=1.0,
+        epochs=20_000, lr=3e-3, print_every=500,
+        scheduler_cls=StepLR, scheduler_kwargs={'step_size': 5000, 'gamma': 0.5},
+        stop_schedule=40000
+    ):
 
         # move model to device
         self.to(device)
@@ -133,7 +136,13 @@ class MLPPINN(nn.Module):
         return {"Data": data_loss_his, "Initial Condition Loss": ic_loss_his,
                 "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
-    def predict(self, alpha, X_test):
+    # MLP Model
+    def predict(
+        # ------------ args ---------------
+        self, alpha,
+        X_test,  
+        # ----------- kwargs ---------------
+    ):
         """Return the predcited result with no uq"""
         mean = self.forward(X_test)
         lower = torch.tensor(mean, device=X_test.device)

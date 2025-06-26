@@ -393,4 +393,3 @@ def plot_predictions_2D_compare(
     ax.set_ylabel("y")
 
     plt.tight_layout()
-    plt.show()
