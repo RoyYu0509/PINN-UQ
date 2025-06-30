@@ -294,4 +294,3 @@ class CPPINN(nn.Module):
         coverage = np.mean((Y_test >= lower) & (Y_test <= upper))
 
         return [lower, upper], coverage
-

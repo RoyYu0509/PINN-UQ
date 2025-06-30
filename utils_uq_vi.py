@@ -115,7 +115,7 @@ class VIBPINN(BayesianFeedForwardNN):
                     elif isinstance(scheduler, StepLR):
                         scheduler.step()
 
-        return {"ELBO": nelbo_loss_his, "Initial Condition Loss": ic_loss_his,
+        return {"Data":loss_data, "ELBO": nelbo_loss_his, "Initial Condition Loss": ic_loss_his,
                 "Boundary Condition Loss": bc_loss_his, "PDE Residue Loss": pde_loss_his}
 
     # Variational Inference
