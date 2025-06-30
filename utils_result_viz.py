@@ -248,62 +248,44 @@ def plot_dual_expected_vs_empirical(df_uncal, df_cal,
     plt.show()
 
 
-
-# 2D Visualizer
-def plot_predictions_2D(XY_test, pred_set, true_solution, title="2D UQ Result"):
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    x = XY_test[:, 0].detach().cpu().numpy()
-    y = XY_test[:, 1].detach().cpu().numpy()
-    lower_np = pred_set[0].detach().cpu().numpy().flatten()
-    upper_np = pred_set[1].detach().cpu().numpy().flatten()
-    mean_np = (lower_np + upper_np) / 2.0
-
-    true_np = true_solution(XY_test).detach().cpu().numpy().flatten()
-
-    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
-    for ax, data, title_sub in zip(
-        axs,
-        [true_np, mean_np, upper_np - lower_np],
-        ["True u(x,y)", "Predicted Mean", "Predictive Interval Width"]
-    ):
-        sc = ax.tricontourf(x, y, data, levels=100)
-        fig.colorbar(sc, ax=ax)
-        ax.set_title(f"{title}: {title_sub}")
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
-    plt.tight_layout()
-    plt.show()
-
-
-
-
 def plot_predictions_2D_compare(
     XY_test,
     pred_set_uncal,
     pred_set_cal,
     true_solution,
+    X_pts=None,
     title="2D UQ Result",
-    vlim_true=None,  # Customized range for the color grid
+    vlim_true=None,
     vlim_pred_mean=None,
-    vlim_pred_width=None
+    vlim_pred_width=None,
+    show_pts=False  # Control whether to scatter X_pts
 ):
     """
-    Plots 2D prediction comparison with optional fixed color ranges.
-    
+    Plots 2D prediction comparison with optional fixed color ranges and overlay of sample points.
+
     Args:
         XY_test: Tensor of shape (N, 2)
         pred_set_uncal: Tuple (lower, upper) from uncalibrated model
         pred_set_cal: Tuple (lower, upper) from calibrated model
         true_solution: Callable true u(x,y)
+        X_pts: Optional tensor/array of shape (M, 2) — points to overlay
         vlim_true: tuple (vmin, vmax) or None — color range for true u(x,y)
         vlim_pred_mean: tuple (vmin, vmax) or None — color range for predicted means
         vlim_pred_width: tuple (vmin, vmax) or None — color range for interval widths
+        show_pts: bool — whether to show X_pts on plots
     """
     import matplotlib.pyplot as plt
     import numpy as np
     import torch
+
+    # Convert X_pts to numpy and extract x/y
+    if X_pts is not None and show_pts:
+        if isinstance(X_pts, torch.Tensor):
+            X_pts = X_pts.detach().cpu().numpy()
+        x_pts = X_pts[:, 0]
+        y_pts = X_pts[:, 1]
+    else:
+        x_pts = y_pts = None
 
     # Extract test points
     x = XY_test[:, 0].detach().cpu().numpy()
@@ -333,6 +315,12 @@ def plot_predictions_2D_compare(
     # Plot setup
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
 
+    # Function to add scatter if needed
+    def add_scatter(ax):
+        if x_pts is not None and y_pts is not None:
+            ax.scatter(x_pts, y_pts, color='black', s=10, alpha=0.8, label='Sample Points')
+            ax.legend(loc='upper right')
+
     # ─────────────── True Solution ───────────────
     for row in range(2):
         ax = axs[row, 0]
@@ -341,6 +329,7 @@ def plot_predictions_2D_compare(
             vmin=None if vlim_true is None else vlim_true[0],
             vmax=None if vlim_true is None else vlim_true[1]
         )
+        add_scatter(ax)
         fig.colorbar(im, ax=ax)
         ax.set_title(f"{title}: True u(x,y)")
         ax.set_xlabel("x")
@@ -353,6 +342,7 @@ def plot_predictions_2D_compare(
         vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
         vmax=None if vlim_pred_mean is None else vlim_pred_mean[1]
     )
+    add_scatter(ax)
     fig.colorbar(im, ax=ax)
     ax.set_title(f"{title}: Predicted Mean (Uncalibrated)")
     ax.set_xlabel("x")
@@ -364,6 +354,7 @@ def plot_predictions_2D_compare(
         vmin=None if vlim_pred_width is None else vlim_pred_width[0],
         vmax=None if vlim_pred_width is None else vlim_pred_width[1]
     )
+    add_scatter(ax)
     fig.colorbar(im, ax=ax)
     ax.set_title(f"{title}: Interval Width (Uncalibrated)")
     ax.set_xlabel("x")
@@ -376,6 +367,7 @@ def plot_predictions_2D_compare(
         vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
         vmax=None if vlim_pred_mean is None else vlim_pred_mean[1]
     )
+    add_scatter(ax)
     fig.colorbar(im, ax=ax)
     ax.set_title(f"{title}: Predicted Mean (Calibrated)")
     ax.set_xlabel("x")
@@ -387,6 +379,7 @@ def plot_predictions_2D_compare(
         vmin=None if vlim_pred_width is None else vlim_pred_width[0],
         vmax=None if vlim_pred_width is None else vlim_pred_width[1]
     )
+    add_scatter(ax)
     fig.colorbar(im, ax=ax)
     ax.set_title(f"{title}: Interval Width (Calibrated)")
     ax.set_xlabel("x")
