@@ -63,7 +63,9 @@ def hyperparameter_tuning(
         # Plotting function
         plotting_func = plot_2D_comparison_with_coverage,
         save_dir="uqmodel",
-        X_vis=None, Y_vis=None
+        X_vis=None, Y_vis=None,
+        # Needed for model selection
+        X_validation=None, Y_validation=None,
     ):
     """
     Performs grid search over hyperparameters, trains model, and saves prediction plot for each config.
@@ -95,8 +97,16 @@ def hyperparameter_tuning(
         # Baseline Model
         print(f"\n[🟠] Training...")
         baseline_loss_dict = uqmodel.fit(**fit_args, **hyperparams)
-        baseline_data_loss = baseline_loss_dict["Data"][-1]
-        
+
+        # Compute the baseline model's data loss
+        if (X_validation is None) or (Y_validation is None):
+            raise TypeError("Missing validation data `X_validation` or `Y_validation")
+        baseline_data_loss = uqmodel.data_loss(X_validation, Y_validation)
+
+        if baseline_data_loss < best_loss:
+            best_loss = baseline_data_loss
+            best_params = hyperparams
+
         print(f"\n[🟠] Inferencing...")
         # Baseline Model Prediction
         cp_uncal_predset = uqmodel.predict(
@@ -110,12 +120,7 @@ def hyperparameter_tuning(
             alpha=alpha, X_test=X_test,
             **cp_pred_kwargs
         )
-        # Update best
-        if baseline_data_loss < best_loss:
-            best_loss = baseline_data_loss
-            best_params = hyperparams
-
-        
+    
         # Compute the coverage plots
         print(f"\n[🟠] Computing Coverage...")
         df_uncal = baseline_test_uncertainties(**baseline_coverage_args)

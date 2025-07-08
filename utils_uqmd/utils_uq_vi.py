@@ -149,3 +149,13 @@ class VIBPINN(BayesianFeedForwardNN):
         upper_bound = mean + z_score * std
 
         return [lower_bound, upper_bound]
+    
+    @torch.inference_mode()
+    def data_loss(self, X_test, Y_test):
+        """Compute the data loss on the testing data set"""
+
+        preds = self(X_test)
+        loss  = torch.nn.functional.mse_loss(preds, Y_test,
+                                             reduction="mean")
+        # If the caller asked for a reduced value, return the Python float
+        return loss.item() 
