@@ -710,3 +710,32 @@ def plot_1D_comparison_with_coverage(
 
     plt.tight_layout()
     # plt.show()
+
+
+
+import matplotlib.pyplot as plt
+
+def plot_truth_and_samples_2D(
+    X_train, Y_train, grid, U_true_grid, domain,
+    title="2D PDE samples visualization"
+):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    # Show the true solution as a colormap
+    x = np.linspace(domain[0][0], domain[0][1], U_true_grid.shape[0])
+    y = np.linspace(domain[1][0], domain[1][1], U_true_grid.shape[1])
+    im = ax.imshow(
+        U_true_grid,
+        extent=(domain[0][0], domain[0][1], domain[1][0], domain[1][1]),
+        origin='lower',
+        aspect='auto',
+        alpha=0.8,
+        cmap='coolwarm'
+    )
+    # Overlay noisy training points
+    ax.scatter(X_train[:,0], X_train[:,1], c=Y_train, edgecolor='k', cmap='viridis', s=18, label="Noisy samples")
+    plt.colorbar(im, ax=ax, label="u(x, y)")
+    ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax.set_title(title)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()

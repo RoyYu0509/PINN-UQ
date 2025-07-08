@@ -1,1 +1,6 @@
-*png
+# Ignore all PNG images
+*.png
+
+# Byte-code caches
+*.pyc
+__pycache__
