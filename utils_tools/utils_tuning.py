@@ -58,7 +58,7 @@ def hyperparameter_tuning(
         baseline_pred_kwargs: dict, cp_pred_kwargs: dict,
         true_solution,
         # Coverage Test
-        baseline_coverage_args: dict, cp_coverage_args: dict,
+        baseline_testing_args: dict, cp_testing_args: dict,
         baseline_test_uncertainties,
         # Plotting function
         plotting_func = plot_2D_comparison_with_coverage,
@@ -121,10 +121,10 @@ def hyperparameter_tuning(
             **cp_pred_kwargs
         )
     
-        # Compute the coverage plots
+        # Compute the metrics and coverage plots
         print(f"\n[🟠] Computing Coverage...")
-        df_uncal = baseline_test_uncertainties(**baseline_coverage_args)
-        df_cal = cp_test_uncertainties(cp_model, **cp_coverage_args)
+        df_uncal = baseline_test_uncertainties(**baseline_testing_args)
+        df_cal = cp_test_uncertainties(cp_model, **cp_testing_args)
         
         print(f"\n[✅] Data Loss = {baseline_data_loss:.3e}")
 
