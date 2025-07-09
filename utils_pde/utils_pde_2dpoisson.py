@@ -31,6 +31,7 @@ class Poisson2D(BasePDE):
         self.x0, self.x1 = domain[0]
         self.y0, self.y1 = domain[1]
         self.true_solution = true_solution  # keep same attribute name convention
+        self.b_pts_n = b_pts_n
 
     # ------------------------------------------------------------------
     # Forcing term f(x,y) chosen so that u* = sin(πx) sin(πy) is exact.

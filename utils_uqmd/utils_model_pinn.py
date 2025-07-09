@@ -49,8 +49,8 @@ class DeterministicFeedForwardNN(BasePINNModel):
 class PINN(DeterministicFeedForwardNN):
     """Learn a PINN model for different 1d PDE"""
 
-    def __init__(self, pde_class, input_dim, layers, output_dim, activation=torch.tanh):
-        super().__init__(input_dim, layers, output_dim, activation)
+    def __init__(self, pde_class, input_dim, hidden_dims, output_dim, activation= nn.Tanh()):
+        super().__init__(input_dim, hidden_dims, output_dim, activation)
         self.pde = pde_class
 
     def fit_pinn(self,
