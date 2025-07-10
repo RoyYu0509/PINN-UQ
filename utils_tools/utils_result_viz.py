@@ -739,3 +739,81 @@ def plot_truth_and_samples_2D(
     ax.legend()
     plt.tight_layout()
     plt.show()
+
+
+def plot_metrics_table(
+    X_test: torch.Tensor,
+    cp_uncal_predset,
+    cp_cal_predset,
+    true_solution,
+    df_uncal: pd.DataFrame,
+    df_cal: pd.DataFrame,
+    title: str = "",
+    main_title: str | None = None,
+    X_vis=None, Y_vis=None,
+    alpha_level: float = 0.95,
+    figsize: tuple = (9, 2.5),
+    max_digits_display = lambda x: f"{x:.4g}"
+):
+    """
+    Display a side-by-side metrics comparison (table) for the uncalibrated and
+    calibrated models at a single alpha level.
+    """
+    alpha_level_upper = alpha_level + 1e-3
+    alpha_level_lower = alpha_level - 1e-3
+    
+    # ────────────────────── 1. Slice the two rows ──────────────────────
+    row_uncal = df_uncal.loc[(df_uncal["alpha"] <= alpha_level_upper) & 
+                           (df_uncal["alpha"] >= alpha_level_lower)].copy()
+    row_uncal["model"] = "uncalibrated"
+    row_uncal["actual alpha"] = 1-row_uncal["coverage"]
+
+    row_cal = df_cal.loc[(df_cal["alpha"] <= alpha_level_upper) & 
+                        (df_cal["alpha"] >= alpha_level_lower)].copy()
+    row_cal["model"] = "calibrated"
+    row_cal["actual alpha"] = 1-row_cal["coverage"]
+
+    if row_uncal.empty or row_cal.empty:
+        raise ValueError(f"alpha={alpha_level} not found in both data frames.")
+
+    # ───────────────────── 2. Stack & tidy up ──────────────────────────
+    rows = pd.concat([row_uncal, row_cal], axis=0).reset_index(drop=True)
+    
+    # Get all columns except 'model' for the selection
+    other_cols = [c for c in rows.columns if c != "model"]
+    rows = rows.loc[:, ["model"] + other_cols]
+
+    rows = rows.rename(columns={"alpha": "expected alpha"})
+    
+    # nice ordering: model | expected alpha | true alpha | <metrics…>
+    metric_cols = [c for c in rows.columns if c not in ("model", "expected alpha", "actual alpha")]
+    rows = rows[["model", "expected alpha", "actual alpha"] + metric_cols]
+    
+
+    # ──────────────── 2.5. Format numeric values ───────────────────────
+    # Format all numeric columns to 4 decimal places (excluding 'model' column)
+    for col in rows.columns:
+        if pd.api.types.is_numeric_dtype(rows[col]):
+            rows[col] = rows[col].apply(max_digits_display)  # .4g gives up to 4 significant 
+
+    # ───────────────────── 3. Plot as table ────────────────────────────
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=rows.values,
+        colLabels=rows.columns,
+        rowLabels=rows["model"].tolist(),
+        loc="center",
+        cellLoc="center",
+    )
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1, 1.25)
+
+    if main_title is not None:
+        plt.title(main_title, pad=20, fontsize=12)
+
+    plt.tight_layout()
+    return fig

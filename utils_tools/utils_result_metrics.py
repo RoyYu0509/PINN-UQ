@@ -28,6 +28,29 @@ else:
     device = torch.device("cpu")   # Fallback to CPU
 
 
+def generating_alphas(n: int = 20,
+                      step: float = 0.05,
+                      dtype=torch.float32) -> torch.Tensor:
+    """
+    Return `n` alpha levels evenly spaced by `step`, starting at `step`
+    (so 0.0 is excluded) and ending at 1.0.
+
+    By default (`n=20`, `step=0.05`) the tensor is:
+        0.05, 0.10, …, 0.95, 1.00
+    which ensures an exact 0.95 entry.
+
+    Returns
+    -------
+    alphas : (n, 1) torch.Tensor
+        Column vector of alpha values.
+    """
+    alphas = torch.arange(step, 1.0 + 1e-8, step, dtype=dtype)   # 0.05 … 1.00
+    if len(alphas) != n:
+        raise ValueError(f"With step={step}, you need n={len(alphas)} for range 0–1.")
+    
+    return alphas[:len(alphas)-1].view(-1, 1)
+
+
 def _to_numpy(x):
     "Torch → NumPy if necessary, otherwise no-op."
     if torch.is_tensor(x):
