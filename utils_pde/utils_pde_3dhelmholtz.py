@@ -1,0 +1,160 @@
+# utils_pde_helmholtz3d.py
+# -------------------------------------------------------------------------- #
+# 3-D Helmholtz equation on Ω = (x0,x1)×(y0,y1)×(z0,z1)
+#
+#     ∇²u(x,y,z) + k² u(x,y,z) = f(x,y,z)          in Ω
+#                       u      = 0                 on ∂Ω      (Dirichlet)
+#
+# Analytic solution used for testing & synthetic data:
+#     u*(x,y,z) = sin(πx)·sin(πy)·sin(πz)
+# which gives
+#     f(x,y,z) = (k² − 3π²)·sin(πx)·sin(πy)·sin(πz)
+# -------------------------------------------------------------------------- #
+import math
+from typing import Callable, Tuple
+
+import torch
+from utils_pde.interface_pde import BasePDE
+
+
+class Helmholtz3D(BasePDE):
+    """
+    3-D Helmholtz equation with zero Dirichlet BC on a rectangular box.
+
+    Parameters
+    ----------
+    k : float
+        Wave-number coefficient in ∇²u + k²u = f.
+    domain : ((float,float), (float,float), (float,float))
+        (x0,x1), (y0,y1), (z0,z1) describing Ω.
+    true_solution : Callable[[Tensor], Tensor]
+        Exact solution u*(x,y,z) for testing / synthetic data.
+    b_pts_n : int
+        Number of boundary points sampled per boundary_loss() call.
+    """
+
+    # ------------------------------------------------------------------ #
+    def __init__(
+        self,
+        k: float = math.pi,
+        domain: Tuple[Tuple[float, float],
+                      Tuple[float, float],
+                      Tuple[float, float]] = ((0.0, 1.0),
+                                              (0.0, 1.0),
+                                              (0.0, 1.0)),
+        true_solution: Callable[[torch.Tensor], torch.Tensor] = (
+            lambda xyz: torch.sin(math.pi * xyz[..., 0:1])
+            * torch.sin(math.pi * xyz[..., 1:2])
+            * torch.sin(math.pi * xyz[..., 2:3])
+        ),
+        b_pts_n: int = 1_000,
+    ):
+        self.k = k
+        (self.x0, self.x1), (self.y0, self.y1), (self.z0, self.z1) = domain
+        self.true_solution = true_solution
+        self.b_pts_n = b_pts_n
+
+    # ------------------------------------------------------------------ #
+    # Forcing term f(x,y,z) matching the analytic solution
+    # ------------------------------------------------------------------ #
+    def _forcing(self, xyz: torch.Tensor) -> torch.Tensor:
+        """Compute f for given (N,3) xyz points."""
+        return (self.k ** 2 - 3 * math.pi ** 2) * (
+            torch.sin(math.pi * xyz[..., 0:1])
+            * torch.sin(math.pi * xyz[..., 1:2])
+            * torch.sin(math.pi * xyz[..., 2:3])
+        )
+
+    # ------------------------------------------------------------------ #
+    # Core residual  ∇²u + k²u − f    (no squaring / averaging here)
+    # ------------------------------------------------------------------ #
+    def _residual(self, model, xyz: torch.Tensor) -> torch.Tensor:
+        xyz = xyz.requires_grad_(True)
+        u = model(xyz)                                # u(x,y,z)
+        grad_u = torch.autograd.grad(                 # ∇u
+            u, xyz, grad_outputs=torch.ones_like(u), create_graph=True
+        )[0]
+
+        u_x, u_y, u_z = grad_u.split(1, dim=1)
+
+        u_xx = torch.autograd.grad(u_x, xyz,
+                                   grad_outputs=torch.ones_like(u_x),
+                                   create_graph=True)[0][:, 0:1]
+        u_yy = torch.autograd.grad(u_y, xyz,
+                                   grad_outputs=torch.ones_like(u_y),
+                                   create_graph=True)[0][:, 1:2]
+        u_zz = torch.autograd.grad(u_z, xyz,
+                                   grad_outputs=torch.ones_like(u_z),
+                                   create_graph=True)[0][:, 2:3]
+
+        laplace_u = u_xx + u_yy + u_zz
+        return laplace_u + self.k ** 2 * u - self._forcing(xyz)
+
+    # ------------------------------------------------------------------ #
+    # Collocation residual ‖·‖² averaged over N interior samples
+    # ------------------------------------------------------------------ #
+    def residual(self, model, coloc_pt_num: int) -> torch.Tensor:
+        x = torch.rand(coloc_pt_num, 1) * (self.x1 - self.x0) + self.x0
+        y = torch.rand(coloc_pt_num, 1) * (self.y1 - self.y0) + self.y0
+        z = torch.rand(coloc_pt_num, 1) * (self.z1 - self.z0) + self.z0
+        xyz = torch.cat([x, y, z], dim=1).to(dtype=torch.float32)
+        return (self._residual(model, xyz) ** 2).mean()
+
+    # ------------------------------------------------------------------ #
+    # Dirichlet boundary loss  u|∂Ω = 0               (six cube faces)
+    # ------------------------------------------------------------------ #
+    def boundary_loss(self, model) -> torch.Tensor:
+        n_b = self.b_pts_n
+        x = torch.rand(n_b, 1) * (self.x1 - self.x0) + self.x0
+        y = torch.rand(n_b, 1) * (self.y1 - self.y0) + self.y0
+        z = torch.rand(n_b, 1) * (self.z1 - self.z0) + self.z0
+
+        # Six faces of the cube
+        xyz_bdry = torch.cat(
+            [
+                torch.cat([torch.full_like(y, self.x0), y, z], dim=1),  # x = x0
+                torch.cat([torch.full_like(y, self.x1), y, z], dim=1),  # x = x1
+                torch.cat([x, torch.full_like(x, self.y0), z], dim=1),  # y = y0
+                torch.cat([x, torch.full_like(x, self.y1), z], dim=1),  # y = y1
+                torch.cat([x, y, torch.full_like(x, self.z0)], dim=1),  # z = z0
+                torch.cat([x, y, torch.full_like(x, self.z1)], dim=1),  # z = z1
+            ],
+            dim=0,
+        ).to(dtype=torch.float32)
+
+        u_pred = model(xyz_bdry)
+        return (u_pred ** 2).mean()
+
+    # ------------------------------------------------------------------ #
+    # Synthetic observation sampler  (useful for PINN calibration / UQ)
+    # ------------------------------------------------------------------ #
+    def data_generation(
+        self,
+        size: int,
+        noise: float = 0.0,
+        true_solution: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        seed: int | None = None,
+        device: torch.device | None = None,
+    ):
+        """
+        Returns
+        -------
+        X : (size, 3) torch.Tensor  • random (x,y,z) points in Ω
+        Y : (size, 1) torch.Tensor  • true_solution(X) with optional noise
+        """
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        device = torch.device("cpu") if device is None else device
+
+        xs = torch.rand(size, 1, device=device) * (self.x1 - self.x0) + self.x0
+        ys = torch.rand(size, 1, device=device) * (self.y1 - self.y0) + self.y0
+        zs = torch.rand(size, 1, device=device) * (self.z1 - self.z0) + self.z0
+        X = torch.cat([xs, ys, zs], dim=1)
+
+        if true_solution is None:
+            true_solution = self.true_solution
+        Y_clean = true_solution(X).view(-1, 1)
+
+        Y = Y_clean + noise * torch.randn_like(Y_clean) if noise > 0.0 else Y_clean
+        return X.to(dtype=torch.float32), Y.to(dtype=torch.float32)
