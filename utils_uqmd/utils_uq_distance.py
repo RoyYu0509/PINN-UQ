@@ -64,10 +64,10 @@ class DistanceUQPINN(BasePINNModel):
     # ───────────────────── trainer ─────────────────────
     def fit(
         self,
+        coloc_pt_num:  int,
         X_train:       torch.Tensor,
         Y_train:       torch.Tensor,
         *,
-        coloc_pt_num:  int            = 0,
         λ_pde:         float          = 1.0,
         λ_ic:          float          = 10.0,
         λ_bc:          float          = 10.0,

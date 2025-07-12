@@ -343,26 +343,3 @@ def dist_test_uncertainties(uqmodel,
         })
     return pd.DataFrame(results)
 
-
-
-# ------------------------------------------------------------------------------------
-def plot_uncertainty(pred_set, x_grid, title='Uncertainty Across Input Grid'):
-    """
-    Plot the uncertainty (interval width) over the grid.
-
-    Parameters:
-    - pred_set: tuple or list containing (lower_bounds, upper_bounds)
-    - x_grid: 1D array of x values (same length as pred_set[0] and pred_set[1])
-    """
-    lower_bounds = np.array(pred_set[0])
-    upper_bounds = np.array(pred_set[1])
-    uncertainty = (upper_bounds - lower_bounds)
-
-    plt.figure(figsize=(8, 5))
-    plt.plot(x_grid, uncertainty, label='Uncertainty Width')
-    plt.xlabel('x')
-    plt.ylabel('Prediction Interval Width')
-    plt.title(title)
-    plt.grid(True)
-    plt.legend()
-    plt.show()

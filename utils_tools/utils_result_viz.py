@@ -817,3 +817,87 @@ def plot_metrics_table(
 
     plt.tight_layout()
     return fig
+
+
+
+
+def _to_1d_np(arr):
+    """Convert list / ndarray / torch tensor to 1-D NumPy."""
+    if isinstance(arr, torch.Tensor):
+        arr = arr.detach().cpu().numpy()
+    return np.asarray(arr).reshape(-1)
+
+
+def plot_1d_intervals_comparison(
+    X_test,
+    uncal_interval,
+    cp_intervals,
+    true_solution,                       # array OR callable
+    t_train=None,
+    y_train=None,
+    title="PINN Prediction with Conformal & Naïve Intervals",
+    figsize=(8, 5),
+    colors=None,
+    alpha_cp=0.5,
+    alpha_naive=0.3,
+):
+    """
+    Plot true solution, predicted mean (mid-point of naïve band),
+    and two uncertainty bands.
+
+    true_solution can be:
+        • array-like of shape (N_test,)  OR
+        • a function f(t) → array-like  evaluated at X_test
+    """
+    # ------------------------------------------------------------
+    # 1. Evaluate the truth if the user handed in a function
+    if callable(true_solution):
+        true_solution = true_solution(X_test)
+
+    # 2. Flatten / convert to 1-D NumPy
+    X_test = _to_1d_np(X_test)
+    true_solution = _to_1d_np(true_solution)
+
+    n_lower, n_upper = uncal_interval
+    n_lower = _to_1d_np(n_lower)
+    n_upper = _to_1d_np(n_upper)
+    n_pred_mean = (n_lower + n_upper) / 2
+
+    cp_lower, cp_upper = cp_intervals
+    cp_lower = _to_1d_np(cp_lower)
+    cp_upper = _to_1d_np(cp_upper)
+    # (Optional) mean of the conformal band if you ever need it:
+    # cp_pred_mean = (cp_lower + cp_upper) / 2
+    # ------------------------------------------------------------
+    # 3. Colours
+    col = {
+        "truth": "k--",
+        "mean": "b",
+        "cp_fill": "green",
+        "naive_fill": "blue",
+    }
+    if colors:
+        col.update(colors)
+    # ------------------------------------------------------------
+    # 4. Plot
+    plt.figure(figsize=figsize)
+    plt.plot(X_test, true_solution, col["truth"], label="True $x(t)$")
+    plt.plot(X_test, n_pred_mean, col["mean"], label="Predicted mean")
+
+    plt.fill_between(
+        X_test, cp_lower, cp_upper, color=col["cp_fill"], alpha=alpha_cp, label="Conformal band"
+    )
+    plt.fill_between(
+        X_test, n_lower, n_upper, color=col["naive_fill"], alpha=alpha_naive, label="Naïve band"
+    )
+
+    if t_train is not None and y_train is not None:
+        plt.scatter(_to_1d_np(t_train), _to_1d_np(y_train), color="red", s=12, label="Training data")
+
+    plt.xlabel("Time $t$")
+    plt.ylabel("Displacement $x$")
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
