@@ -95,7 +95,7 @@ class BayesianLinearLayer(BaseLayer):
 
 #     def forward(self, x):
 #         # Sample the std  σ  of the weights and biases (the reparameterization trick)
-#         weight_sigma = torch.log1p(torch.exp(self.weight_rho))  # softplus to ensure positivity
+#         weoight_sigma = torh.log1p(torch.exp(self.weight_rho))  # softplus to ensure positivity
 #         bias_sigma = torch.log1p(torch.exp(self.bias_rho))
 
 #         # Sample ε ∼ 𝒩(0,1) for weights and baises
@@ -108,7 +108,7 @@ class BayesianLinearLayer(BaseLayer):
 #         bias = self.bias_mu + bias_sigma * eps_b
 
 #         # Linear layer computation xWᵀ + b
-#         return x.matmul(weight.t()) + bias  # the output of this bayesian linear layer
+#         return x.matmul(weight.t()) + bias  # the utput of this bayesian linear layer
 
 #     def kl_divergence(self):
 #         # Compute KL divergence KL[q(w,b) || p(w,b)] for this layer (sum over all weights and biases)

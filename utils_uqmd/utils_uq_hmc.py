@@ -1,257 +1,240 @@
-###############################################################################
-# HMCBPINN – v2
-#     * Works with PDE helpers that expose
-#         • residual_losses(model, …)            OR
-#         • residual(model, coloc_pt_num)  and  boundary_loss(model, …)
-#     * Interface still matches your Dropout-NN and VI-NN for CP utilities
-# 
-# HMC Best Explaination: https://www.youtube.com/watch?v=FYliDjeYuXg
-#
-# Intuition:  θ is a position of a particle in space & invent a fake "momentum" 
-#             variable p of the same shape
-#
-# Leap frog: Simulate the progression of θ and p, with dt being replaced by a ε
-#            后面那两个乘上的东西是他们的derivative
-# 
-###############################################################################
-import copy, torch, math
+# utils_uq_hmc_fast.py   ──  v3  (tqdm + safe grad on mps/cpu/cuda)
+# -----------------------------------------------------------------------------
+import torch, math
 import torch.nn as nn
-from torch.optim.lr_scheduler import StepLR
+from torch.func import functional_call          # still used for fast forward
+from tqdm.auto import trange                    # progress-bars
 
+# -----------------------------------------------------------------------------
+# helpers
+# -----------------------------------------------------------------------------
+def flatten_params(params):
+    return torch.cat([p.reshape(-1) for p in params])
+
+def unflatten_params(model, theta_vec):
+    """Write theta_vec back into model.parameters(), in-place."""
+    idx = 0
+    for p in model.parameters():
+        n = p.numel()
+        p.data = theta_vec[idx:idx+n].view_as(p)
+        idx += n
+    assert idx == theta_vec.numel(), "θ size mismatch"
+
+# -----------------------------------------------------------------------------
+# FastHMCBPINN
+# -----------------------------------------------------------------------------
 class HMCBPINN(nn.Module):
-    # ───────────────────────── constructor ────────────────────────────
-    def __init__(self,
-                 pde_class,
-                 input_dim: int,
-                 hidden_dims: list[int],
-                 output_dim: int,
-                 act_func      = nn.Tanh(),
-                 prior_std     : float = 1.0,
-                 step_size     : float = 1e-3,
-                 leapfrog_steps: int   = 5,
-                 device=None):
+    """
+    Vectorised HMC (multi-chain) PINN with tqdm bars and device-safe grads.
+    """
+    def __init__(self, pde_class, input_dim, hidden_dims, output_dim,
+                 act_func=nn.Tanh, prior_std=1.0,
+                 step_size=1e-3, leapfrog_steps=10, chains=1, device='cpu'):
         super().__init__()
+        self.pde        = pde_class
+        self.prior_std2 = prior_std**2
+        self.eps        = step_size
+        self.L          = leapfrog_steps
+        self.chains     = chains
+        self.device     = device
 
-        self.pde            = pde_class
-        self.prior_std      = prior_std
-        self.step_size      = step_size
-        self.leapfrog_steps = leapfrog_steps
-        self.device         = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        dims = [input_dim] + hidden_dims + [output_dim]
+        layers = []
+        for d_in, d_out in zip(dims[:-1], dims[1:]):
+            layers.append(nn.Linear(d_in, d_out))
+            if d_out != output_dim:
+                layers.append(act_func())
+        self.net = nn.Sequential(*layers).to(device)
 
-        layers = [nn.Linear(input_dim, hidden_dims[0]), act_func]
-        for h_in, h_out in zip(hidden_dims[:-1], hidden_dims[1:]):
-            layers += [nn.Linear(h_in, h_out), act_func]
-        layers += [nn.Linear(hidden_dims[-1], output_dim)]
-        self.net = nn.Sequential(*layers).to(self.device)
+        self._posterior = []
+        self._coloc_pt_num = None
 
-        self._posterior : list[dict[str, torch.Tensor]] = []
-        self._coloc_pt_num = None      # set during fit()
+    # ------------------------------------------------------------------
+    # forward
+    # ------------------------------------------------------------------
+    def forward(self, x, params=None):
+        if params is None:
+            return self.net(x)
+        return functional_call(self.net, params, (x,))
 
-    # ────────────────────────── forward ───────────────────────────────
-    def forward(self, x, *, return_hidden=False):
-        h = x.to(self.device)
-        hidden = []
-        for layer in self.net:
-            h = layer(h)
-            if return_hidden and isinstance(layer, nn.Linear):
-                hidden.append(h)
-        return (h, torch.cat(hidden, -1)) if return_hidden else h
-
-    # ───────────────── probability components ────────────────────────
-    def _log_prior(self):
-        # Assume theta ~ N(0, σ2)
-        σ2 = self.prior_std ** 2
-        # Only lefted with the non-constant term, and it acts like regualrization term in the final loss
-        return sum((-(p**2).sum() / (2*σ2)) for p in self.parameters())
+    # ------------------------------------------------------------------
+    # log-prior & likelihood
+    # ------------------------------------------------------------------
+    def _log_prior(self, theta):
+        return -0.5 * theta.pow(2).sum() / self.prior_std2
 
     def _pde_losses(self, coloc_pt_num):
-        """
-        Returns tuple (pde_loss, ic_loss, bc_loss) in **any** of these cases:
-          1. PDE helper defines .residual_losses(model, …)
-          2. PDE helper defines .residual(model, coloc_pt_num) (+ boundary_loss)
-        """
-        # Case ➊: unified helper exists
-        if hasattr(self.pde, "residual_losses"):
-            return self.pde.residual_losses(self)     # may accept defaults
-
-        # Case ➋: use residual() + boundary_loss()
-        device = next(self.parameters()).device
-        pde_loss = torch.tensor(0.0, device=device)
-        bc_loss  = torch.tensor(0.0, device=device)
-        ic_loss  = torch.tensor(0.0, device=device)   # Poisson has no IC term
-
+        pde = ic = bc = torch.tensor(0., device=self.device)
         if hasattr(self.pde, "residual") and coloc_pt_num is not None:
-            pde_loss = self.pde.residual(self, coloc_pt_num)
+            pde = self.pde.residual(self, coloc_pt_num)
         if hasattr(self.pde, "boundary_loss"):
-            bc_loss  = self.pde.boundary_loss(self)
+            bc = self.pde.boundary_loss(self)
+        if hasattr(self.pde, "ic_loss"):
+            ic = self.pde.ic_loss(self)
+        return pde, ic, bc
 
-        return pde_loss, ic_loss, bc_loss
-
-    def _log_likelihood(self, X, Y, λ_pde, λ_ic, λ_bc, λ_data):
-        # data term
+    def _log_likelihood(self, X, Y, lam_pde, lam_ic, lam_bc, lam_data):
         data_loss = torch.nn.functional.mse_loss(self(X), Y)
-
-        # physics & boundary
         pde_loss, ic_loss, bc_loss = self._pde_losses(self._coloc_pt_num)
+        return -(lam_pde*pde_loss + lam_ic*ic_loss +
+                 lam_bc*bc_loss + lam_data*data_loss), \
+               {"Data": data_loss, "PDE": pde_loss,
+                "IC": ic_loss, "BC": bc_loss}
 
-        logL = -(λ_pde*pde_loss + λ_ic*ic_loss + λ_bc*bc_loss + λ_data*data_loss)
-        parts = {"PDE": pde_loss, "IC": ic_loss, "BC": bc_loss, "Data": data_loss}
-        return logL, parts
+    # ------------------------------------------------------------------
+    # fit  (MAP + HMC)
+    # ------------------------------------------------------------------
+    def fit(self, coloc_pt_num, X_train, Y_train,
+            lam_pde=1., lam_ic=0., lam_bc=1., lam_data=1.,
+            epochs=5000, lr=1e-3,
+            hmc_samples=2000, burn_in=500,
+            print_every=500, step_size=None, leapfrog_steps=None, **unused):
+        
+        if step_size is not None:
+            self.eps = step_size
+        if leapfrog_steps is not None:
+            self.L = leapfrog_steps
 
-    # ───────────── parameter vector helpers (unchanged) ──────────────
-    def pack(self):   return torch.cat([p.detach().flatten() for p in self.parameters()])
-    def unpack(self, vec):
-        offset = 0
-        for p in self.parameters():
-            n = p.numel()
-            p.data.copy_(vec[offset:offset+n].view_as(p))
-            offset += n
-
-    # ───────────────────────── training ───────────────────────────────
-    def fit(self,
-            coloc_pt_num,
-            X_train, Y_train,
-            λ_pde=3.0, λ_ic=10.0, λ_bc=10.0, λ_data=5.0,
-            epochs=20_000, lr=3e-3,
-            hmc_samples=3_000, burn_in=500,
-            step_size=None, leapfrog_steps=None,
-            print_every=2_000,
-            **unused):
         self._coloc_pt_num = coloc_pt_num
-        if step_size is not None:      self.step_size = step_size
-        if leapfrog_steps is not None: self.leapfrog_steps = leapfrog_steps
+        X_train, Y_train = X_train.to(self.device), Y_train.to(self.device)
 
-        hist = {"Total": [], "Data": [], "PDE": [], "IC": [], "BC": []}
+        opt  = torch.optim.Adam(self.parameters(), lr=lr)
+        hist = {k: [] for k in ("Total", "Data", "PDE", "IC", "BC")}
 
-        # 1️⃣  MAP phase --------------------------------------------------------
-        opt   = torch.optim.Adam(self.parameters(), lr=lr)
-        sched = StepLR(opt, step_size=5_000, gamma=0.5)
-
-        for ep in range(epochs):
+        # -------- 1️⃣ MAP optimisation ----------------------------------
+        map_bar = trange(1, epochs+1, desc="MAP", leave=False)
+        for ep in map_bar:
             opt.zero_grad()
             logL, parts = self._log_likelihood(X_train, Y_train,
-                                               λ_pde, λ_ic, λ_bc, λ_data)
-            nlp = -(self._log_prior() + logL)
-            # Descent on the negative log probability
-            nlp.backward(); opt.step(); sched.step()
+                                               lam_pde, lam_ic, lam_bc, lam_data)
+            nlp = -(self._log_prior(flatten_params(self.parameters())) + logL)
+            nlp.backward(); opt.step()
 
             hist["Total"].append(nlp.item())
-            for k in hist.keys() - {"Total"}:
-                v = parts[k]; hist[k].append(v.item() if torch.is_tensor(v) else 0.)
+            for k,v in parts.items(): hist[k].append(v.item())
+
+            if ep % print_every == 0 or ep == epochs:
+                map_bar.write(
+                    f"[MAP] epoch {ep:6d}  −logPost={nlp.item():.3e}  "
+                    + "  ".join(f"{k}={parts[k]:.3e}" for k in parts)
+                )
+            map_bar.set_postfix(loss=f"{nlp.item():.2e}")
+
+        # -------- prepare θ0 for chains --------------------------------
+        θ0 = flatten_params(self.parameters()).detach().to(self.device)
+        θ0 = θ0.repeat(self.chains, 1)                     # (B,D)
+
+        # potential energy
+        def U_scalar(theta_vec):
+            unflatten_params(self, theta_vec)
+            logL, _ = self._log_likelihood(X_train, Y_train,
+                                           lam_pde, lam_ic, lam_bc, lam_data)
+            return -(self._log_prior(theta_vec) + logL)
+
+        def grad_U(theta_mat):                     # (B,D) → (B,D)
+            grads = []
+            for theta in theta_mat:                # loop over chains
+                theta = theta.detach().clone().requires_grad_(True)
+
+                # write the *views* of theta into the model — safe for autograd
+                unflatten_params(self, theta)
+
+                logL, _ = self._log_likelihood(X_train, Y_train,
+                                            lam_pde, lam_ic, lam_bc, lam_data)
+                U       = -(self._log_prior(theta) + logL)
+
+                g, = torch.autograd.grad(U, theta, retain_graph=False)
+                grads.append(g.detach())
+            return torch.stack(grads, 0)
+
+
+        accept_cnt = 0
+        θ = θ0.clone()
+        # print(f"Using step size: {self.eps}, Using Length: {self.L}")
+        g = grad_U(θ)
+        # print(f"∥∇U∥ (mean across chains): {g.norm(dim=1).mean().item():.3e}")
+
+        # -------- 2️⃣ HMC sampling ------------------------------------
+        hmc_bar = trange(1, hmc_samples+1, desc="HMC", leave=False)
+        for it in hmc_bar:
+            p = torch.randn_like(θ)
+            θ_curr, p_curr = θ.clone(), p.clone()
+
+            # half-step momentum
+            p = p - 0.5*self.eps*grad_U(θ)
+
+            θ_before = θ.clone()
+
+            for _ in range(self.L):
+                θ = θ + self.eps*p
+                p = p - self.eps*grad_U(θ)
+            p = p - 0.5*self.eps*grad_U(θ)
+            p = -p                                          # Negate momentum
+            delta_theta = (θ - θ_before).norm(dim=1)
+            # print(f"Δθ (per chain): {delta_theta}")
+
+            # energies
+            U_curr = torch.stack([U_scalar(row) for row in θ_curr])
+            U_prop = torch.stack([U_scalar(row) for row in θ])
+            K_curr = 0.5*p_curr.pow(2).sum(dim=1)
+            K_prop = 0.5*p.pow(2).sum(dim=1)
+
+            delta_H = (U_prop + K_prop) - (U_curr + K_curr)
+            acc_prob = torch.exp(-delta_H).clamp(max=1.0)
+            accept = (torch.rand_like(acc_prob) < acc_prob).view(-1, 1)
+            θ        = torch.where(accept, θ, θ_curr)
+            accept_cnt += accept.float().sum().item()
+
+            if it > burn_in:
+                self._posterior.append(θ.clone().cpu())
+
+            if it % print_every == 0 or it == hmc_samples:
+                hmc_bar.write(f"[HMC] iter {it:6d}  acc-rate={accept_cnt/it:.2f}")
             
-            if (ep+1) % print_every == 0:
-                print(f"[MAP]  epoch {ep+1:6d}   −logPost={nlp.item():.3e}")
+            hmc_bar.set_postfix(acc=f"{accept_cnt/it:.2f}")
 
-        # 2️⃣  HMC sampling -----------------------------------------------------
-        params = list(self.parameters())
-        ε, L   = self.step_size, self.leapfrog_steps
-        acc    = 0
-
-        def U():   # potential energy
-            return -(self._log_prior() +
-                     self._log_likelihood(
-                        X_train, Y_train,
-                        λ_pde, λ_ic, λ_bc, λ_data
-                        )[0] # acess the likelihood value
-                    )
-
-        # Start sampling
-        for it in range(hmc_samples):
-            # Use torch.randn_like(p) to sample from N(0,1) for all the parameters
-            mom = [torch.randn_like(p) for p in params]      # momenta
-
-            # Create copies of current parameters values (initial)
-            θ0  = [p.detach().clone() for p in params]
-            # Create copies of current momentum (initial)
-            m0  = [m.clone() for m in mom]
-
-            # Compute the current Kinetic & Potential energy (initial)
-            U0 = U(); K0 = sum((m**2).sum() for m in mom) * 0.5
-
-
-            # p - theta parameters (position); m - momentum (velocity)
-            # half-kick: compute (m -= ε ∇U/2 ) in high dimensional space
-            self.zero_grad(); U0.backward()
-            for p, m in zip(params, mom):
-                m.sub_(0.5 * ε * p.grad) 
-
-            # leap-frog
-            for l in range(L):
-                # Compute: θ = (θ + ε p) in high dimensional space
-                for p, m in zip(params, mom): 
-                    p.data.add_(ε * m)  
-                
-                # Clear 上一个 step 的 gradient info 
-                self.zero_grad() # Empty the grad info before a new step
-
-                # 重新 evaluate potential energy, 因为现在的 p = [θ....] 不一样了
-                Umid = U() # re-evaluate the potential energy
-                Umid.backward() # fill the p.grad with the new gradient.
-
-                # Compute (p − ε ∇U) in high dimensional space
-                for p, m in zip(params, mom):
-                    g = p.grad
-                    if l < L-1:
-                        m.sub_(ε * g)
-                    # Close up by only performing half update
-                    else:
-                         m.sub_(0.5 * ε * g)
-            
-            # Compute U and K at the proposed (θ, p)
-            U1 = U(); K1 = sum((m**2).sum() for m in mom) * 0.5
-            # Acceptance prob
-            a  = torch.exp((U0 + K0) - (U1 + K1)).clamp(max=1)
-
-            # If accept
-            if torch.rand([]) < a: 
-                acc += 1
-            # If reject, fall back to original (θ, p)
-            else: 
-                for p, θ in zip(params, θ0): 
-                    p.data.copy_(θ)
-            
-            # 如果过了 burn_in period, store 这次 sample 出来的结果
-            if it >= burn_in:
-                self._posterior.append(copy.deepcopy(self.state_dict()))
-
-            if (it+1) % print_every == 0:
-                print(f"[HMC] iter {it+1:6d}   acc-rate={acc/(it+1):.2f}")
-
-        print(f"HMC finished – kept {len(self._posterior)} posterior samples.")
+        print(f"Finished HMC: avg acceptance {accept_cnt / (hmc_samples * self.chains):.3f}")
+        print(f"Keep {len(self._posterior)} posterior sample from the HMC algo")
+        unflatten_params(self, θ[0])           # restore weights
         return hist
 
-    # ───────────────────────── inference ─────────────────────────────
-    @torch.inference_mode()
-    def predict(self, alpha, X_test,
-                X_train=None, Y_train=None,
-                X_cal=None,  Y_cal=None,
-                heuristic_u=None, k=None,
-                n_samples=1_000):
-        if not self._posterior:
-            y = self(X_test); return (y, y)
-    
-        sample_idx = torch.randint(0, len(self._posterior),
-                            (n_samples,), device=self.device)
-        saved = copy.deepcopy(self.state_dict())
+    @torch.no_grad()
+    def predict(self, alpha, X_test, use_chain=0,  **unused):
+        """Draw samples from the HMC posterior and return prediction bounds
+        with configurable confidence level."""
+
+        self.eval()
+        X_test = X_test.to(self.device)
         preds = []
-        for idx in sample_idx:
-            # load the sample parameters to the model
-            self.load_state_dict(self._posterior[int(idx)])
-            # use the current parameters model to predict
-            preds.append(self(X_test))
 
-        # Reload original parameters set (不重要, 只是确保我们不该掉任何随机性)
-        self.load_state_dict(saved)
-        preds = torch.stack(preds)                 # (S,N,1)
-        μ, σ  = preds.mean(0), preds.std(0)
-        z     = torch.distributions.Normal(0,1).icdf(torch.tensor(alpha/2)).abs()
-        return μ - z*σ, μ + z*σ
+        for θ in self._posterior:
+            unflatten_params(self, θ[use_chain].to(self.device))
+            y_pred = self(X_test)
+            preds.append(y_pred.detach())
 
+        preds = torch.stack(preds)  # shape: [n_samples, batch_size, output_dim]
+        mean = preds.mean(dim=0)
+        std = preds.std(dim=0)
+
+        # Convert alpha value to z_score
+        alpha_tensor = torch.tensor([alpha / 2], device=X_test.device, dtype=torch.float32)
+        z_score = torch.distributions.Normal(0, 1).icdf(1 - alpha_tensor).abs().item()
+
+        lower_bound = mean - z_score * std
+        upper_bound = mean + z_score * std
+
+        return (lower_bound, upper_bound)
+
+    
+
+    # ------------------------------------------------------------------
+    # evaluation: test MSE
+    # ------------------------------------------------------------------
     @torch.inference_mode()
     def data_loss(self, X_test, Y_test):
-        """Compute the data loss on the testing data set"""
-        preds = self(X_test)
-        loss  = torch.nn.functional.mse_loss(preds, Y_test,
-                                             reduction="mean")
-        # If the caller asked for a reduced value, return the Python float
-        return loss.item() 
+        """Compute the data loss (MSE) on the given dataset."""
+        X_test = X_test.to(self.device)
+        Y_test = Y_test.to(self.device)
+        preds  = self(X_test)
+        loss   = torch.nn.functional.mse_loss(preds, Y_test, reduction="mean")
+        return loss.item()

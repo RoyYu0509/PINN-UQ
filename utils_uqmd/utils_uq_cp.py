@@ -5,7 +5,7 @@ import numpy as np
 from numpy import random
 import torch
 from sklearn.neighbors import NearestNeighbors
-
+from utils_uqmd.utils_uq_hmc import HMCBPINN
 
 # 🔹 tiny helper: robust Torch/NumPy conversion
 def _to_numpy(x):
@@ -96,7 +96,8 @@ class CP:
         X_train=None,  Y_train=None,
         X_cal=None,   Y_cal=None,
         heuristic_u="feature",
-        k=10
+        k=10,
+        hmc_mean=None
     ):
         """
         Parameters
@@ -104,11 +105,13 @@ class CP:
         alpha : float      desired mis-coverage (e.g. 0.05)
         heuristic_u : str  'feature' | 'latent' | 'raw_std'
         k : int            nearest-neighbour count for k-NN heuristics
+        hmc_mean: must enter for the HMC model in order to inference properly
         """
         # 0️⃣  deterministic run
         torch.manual_seed(0); np.random.seed(0); random.seed(0)
         torch.use_deterministic_algorithms(True)
         self.model.eval()
+        is_hmc = isinstance(self.model, HMCBPINN)
 
         # --- choose conformity metric ----------------------------------------
         if heuristic_u == "feature":
@@ -133,13 +136,21 @@ class CP:
         )                                                # (out_dim,)
 
         # --- point predictions on X_test --------------------------------------
-        with torch.no_grad():
-            self.model.eval()
-            y_pred_test = self.model(X_test.to(self.device)).cpu().numpy()
+        if is_hmc:
+            if hmc_mean is None:
+                raise RuntimeError("Need to enter the hmc model's mean")
+            else:
+                y_pred_test = hmc_mean.cpu().numpy()
+        else:
+            with torch.no_grad():
+                self.model.eval()
+                pred_set = self.model.predict(alpha, X_test.to(self.device))
+                uncal_low, uncal_high = pred_set[0], pred_set[1]
+                y_pred_test = ((uncal_low + uncal_high)/2).cpu().numpy()
 
         # --- build intervals --------------------------------------------------
         eps  = q_hat * test_u[:, None]                   # (N_test, out_dim)
         lower = torch.from_numpy(y_pred_test - eps).to(self.device)
         upper = torch.from_numpy(y_pred_test + eps).to(self.device)
 
-        return [lower, upper]
+        return (lower, upper)

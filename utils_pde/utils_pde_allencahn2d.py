@@ -30,7 +30,7 @@ class AllenCahn2D():
         domain: Tuple[Tuple[float, float], Tuple[float, float]] = ((-1.0, 1.0),
                                                                    (-1.0, 1.0)),
         true_solution: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
-        b_pts_n: int = 500,          # <── default number of boundary pts
+        b_pts_n: int = 1000,          # <── default number of boundary pts
     ):
         self.lam = lam
         self.domain = domain

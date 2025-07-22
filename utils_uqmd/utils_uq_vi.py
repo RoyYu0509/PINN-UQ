@@ -148,7 +148,7 @@ class VIBPINN(BayesianFeedForwardNN):
         lower_bound = mean - z_score * std
         upper_bound = mean + z_score * std
 
-        return [lower_bound, upper_bound]
+        return (lower_bound, upper_bound)
     
     @torch.inference_mode()
     def data_loss(self, X_test, Y_test):

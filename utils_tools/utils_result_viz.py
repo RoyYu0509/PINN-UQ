@@ -193,23 +193,22 @@ def plot_expected_vs_empirical(df, alpha_col='alpha', cov_col='coverage', title=
     plt.tight_layout()
     plt.show()
 
-
-
 import matplotlib.pyplot as plt
 import pandas as pd
-def plot_dual_expected_vs_empirical(df_uncal, df_cal, 
-                                     alpha_col='alpha', cov_col='coverage',
-                                     title1='Uncalibrated Model', title2='Calibrated Model'):
-    """
-    Plots side-by-side coverage plots for uncalibrated and calibrated models.
+import numpy as np
 
-    Parameters:
-    - df_uncal: pd.DataFrame with alpha and coverage for the uncalibrated model
-    - df_cal: pd.DataFrame with alpha and coverage for the calibrated model
-    - alpha_col: column name for alpha values
-    - cov_col: column name for empirical coverage
-    - title1: title for the uncalibrated plot
-    - title2: title for the calibrated plot
+def plot_dual_expected_vs_empirical(
+    df_uncal,
+    df_cal, 
+    alpha_col='alpha',
+    cov_col='coverage',
+    title1='Uncalibrated Model',
+    title2='Calibrated Model',
+    dev_metric='mae'
+):
+    """
+    Plots side-by-side coverage plots for uncalibrated and calibrated models,
+    with subtitle showing deviation from ideal calibration.
     """
 
     def prepare_coverage_data(df):
@@ -220,25 +219,40 @@ def plot_dual_expected_vs_empirical(df_uncal, df_cal,
         sorted_idx = expected_full.argsort()
         return expected_full[sorted_idx], empirical_full[sorted_idx]
 
-    expected1, empirical1 = prepare_coverage_data(df_uncal)
-    expected2, empirical2 = prepare_coverage_data(df_cal)
+    def coverage_deviation(exp, emp, how="mae"):
+        diff = np.abs(emp - exp)
+        if how == "mae":
+            return diff.mean()
+        elif how == "rmse":
+            return np.sqrt((diff**2).mean())
+        elif how == "max":
+            return diff.max()
+        else:
+            raise ValueError("metric must be 'mae', 'rmse', or 'max'")
+
+    # Prepare data and compute deviations
+    exp1, emp1 = prepare_coverage_data(df_uncal)
+    exp2, emp2 = prepare_coverage_data(df_cal)
+
+    dev1 = coverage_deviation(exp1, emp1, how=dev_metric)
+    dev2 = coverage_deviation(exp2, emp2, how=dev_metric)
 
     # Create subplots
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
     # Plot uncalibrated
-    axes[0].plot(expected1, empirical1, marker='o', label='Empirical Coverage')
+    axes[0].plot(exp1, emp1, marker='o', label='Empirical Coverage')
     axes[0].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
-    axes[0].set_title(title1)
+    axes[0].set_title(f"{title1}\nDeviation ({dev_metric.upper()}): {dev1:.3f}")
     axes[0].set_xlabel("Expected Coverage (1 − α)")
     axes[0].set_ylabel("Empirical Coverage")
     axes[0].grid(True)
     axes[0].legend()
 
     # Plot calibrated
-    axes[1].plot(expected2, empirical2, marker='o', label='Empirical Coverage')
+    axes[1].plot(exp2, emp2, marker='o', label='Empirical Coverage')
     axes[1].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
-    axes[1].set_title(title2)
+    axes[1].set_title(f"{title2}\nDeviation ({dev_metric.upper()}): {dev2:.3f}")
     axes[1].set_xlabel("Expected Coverage (1 − α)")
     axes[1].set_ylabel("Empirical Coverage")
     axes[1].grid(True)
@@ -741,13 +755,18 @@ def plot_truth_and_samples_2D(
     plt.show()
 
 
+import matplotlib.pyplot as plt
+import pandas as pd
+
 def plot_metrics_table(
     X_test: torch.Tensor,
     cp_uncal_predset,
     cp_cal_predset,
     true_solution,
-    df_uncal: pd.DataFrame,
-    df_cal: pd.DataFrame,
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    df1_name: str,
+    df2_name: str,
     title: str = "",
     main_title: str | None = None,
     X_vis=None, Y_vis=None,
@@ -763,14 +782,14 @@ def plot_metrics_table(
     alpha_level_lower = alpha_level - 1e-3
     
     # ────────────────────── 1. Slice the two rows ──────────────────────
-    row_uncal = df_uncal.loc[(df_uncal["alpha"] <= alpha_level_upper) & 
-                           (df_uncal["alpha"] >= alpha_level_lower)].copy()
-    row_uncal["model"] = "uncalibrated"
+    row_uncal = df1.loc[(df1["alpha"] <= alpha_level_upper) & 
+                           (df1["alpha"] >= alpha_level_lower)].copy()
+    row_uncal["model"] = df1_name
     row_uncal["actual alpha"] = 1-row_uncal["coverage"]
 
-    row_cal = df_cal.loc[(df_cal["alpha"] <= alpha_level_upper) & 
-                        (df_cal["alpha"] >= alpha_level_lower)].copy()
-    row_cal["model"] = "calibrated"
+    row_cal = df2.loc[(df2["alpha"] <= alpha_level_upper) & 
+                        (df2["alpha"] >= alpha_level_lower)].copy()
+    row_cal["model"] = df2_name
     row_cal["actual alpha"] = 1-row_cal["coverage"]
 
     if row_uncal.empty or row_cal.empty:
@@ -816,9 +835,6 @@ def plot_metrics_table(
         plt.title(main_title, pad=20, fontsize=12)
 
     plt.tight_layout()
-    return fig
-
-
 
 
 def _to_1d_np(arr):

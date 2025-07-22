@@ -180,7 +180,7 @@ class DistanceUQPINN(BasePINNModel):
         # ─── (1-α) interval:  ŷ ± z·σ̂ ───────────────────────────────
         lower = y_pred - z * sigma_hat
         upper = y_pred + z * sigma_hat
-        return lower, upper
+        return (lower, upper)
 
 
 

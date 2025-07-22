@@ -147,7 +147,7 @@ class MLPPINN(nn.Module):
         mean = self.forward(X_test)
         lower = torch.tensor(mean, device=X_test.device)
         upper = torch.tensor(mean, device=X_test.device)
-        return [lower, upper]
+        return (lower, upper)
     
     #####################################################################
     def local_var_predict(self, alpha, X_test, X_train, Y_train, k=10,device="cpu"):

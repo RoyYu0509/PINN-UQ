@@ -35,7 +35,7 @@ class AdaptiveCP:
         Number of training conf_nn_epochs for the quantile network (pinball loss optimization).
     """
     def __init__(self, model, alpha=0.05, device=None, heuristic="feature",
-                 conf_nn_hidden_layers=(64, 64), conf_nn_lr=1e-3, conf_nn_epochs=100):
+                 conf_nn_hidden_layers=(64, 128, 64), conf_nn_lr=1e-4, conf_nn_epochs=10000):
         self.model = model
         self.alpha = alpha
         self.device = device or (next(model.parameters()).device if hasattr(model, 'parameters') else torch.device('cpu'))
@@ -55,13 +55,15 @@ class AdaptiveCP:
         dist, _ = nbrs.kneighbors(_to_numpy(X_ref))
         return dist.mean(axis=1)
 
-    def _latent_distance(self, X_ref, X_train, k: int):
+    def _latent_distance(self, X_ref, X_train, k):
         with torch.no_grad():
             H_ref = self.model(X_ref.to(self.device), return_hidden=True)[1]
             H_trn = self.model(X_train.to(self.device), return_hidden=True)[1]
-        nbrs = NearestNeighbors(n_neighbors=k).fit(_to_numpy(H_trn))
+
+        nbrs = NearestNeighbors(n_neighbors=k+1).fit(_to_numpy(H_trn))
         dist, _ = nbrs.kneighbors(_to_numpy(H_ref))
-        return dist.mean(axis=1)
+        # throw away the 0-distance self-neighbour
+        return dist[:, 1:].mean(axis=1)
 
     def _rawstd_width(self, alpha, X):
         lower, upper = self.model.predict(alpha, X.to(self.device))
