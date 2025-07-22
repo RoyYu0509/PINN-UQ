@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import gc
 import torch
 import copy
-from utils_uqmd.utils_uq_hmc import HMCBPINN
 
 
 def clear_memory(*vars_to_delete):
@@ -133,17 +132,11 @@ def hyperparameter_tuning(
         # CP+ Model
         cp_model = CP(uqmodel_copy)
         # CP+ Model Prediction
-        if isinstance(uqmodel_copy, HMCBPINN):
-            cp_cal_predset = cp_model.predict(
-                alpha=alpha, X_test=X_test,
-                hmc_mean = (cp_uncal_predset[0]+cp_uncal_predset[1])/2,
-                **cp_pred_kwargs
-            )
-        else:
-            cp_cal_predset = cp_model.predict(
-                alpha=alpha, X_test=X_test,
-                **cp_pred_kwargs
-            )
+
+        cp_cal_predset = cp_model.predict(
+            alpha=alpha, X_test=X_test,
+            **cp_pred_kwargs
+        )
     
         # Compute the metrics and coverage plots
         print(f"\n[🟠] Computing Coverage...")

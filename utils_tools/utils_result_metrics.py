@@ -18,7 +18,6 @@ from utils_uqmd.utils_uq_cp import CP
 
 from scipy.stats import norm
 from utils_uqmd.utils_uq_dropout import DropoutPINN
-from utils_uqmd.utils_uq_hmc import HMCBPINN
 
 
 if torch.backends.mps.is_available():
@@ -192,44 +191,25 @@ def cp_test_uncertainties(uqmodel, alphas, X_test, Y_test, X_cal, Y_cal, X_train
     """
     Test the given cp uq model, using different uq metrics
     """
-    if isinstance(uqmodel, HMCBPINN):
-        results=[]
-        for alpha in tqdm(alphas):
-            alpha_val = float(alpha)
-            if not (0.0 < alpha_val < 1.0):
-                raise ValueError("alpha must be in (0,1) for VI.")
-            pred_set = uqmodel.predict(alpha, X_test,  X_train,  Y_train, X_cal, Y_cal, heuristic_u=heuristic_u, k=k, hmc_mean=hmc_mean)
-            coverage = _coverage(pred_set, Y_test)
-            sha = _sharpness(pred_set)
-            sdcv = _sdcv(pred_set)
-            interval_score = _interval_score(pred_set, Y_test, alpha)
+    # if isinstance(uqmodel, CP):
+    results=[]
+    for alpha in tqdm(alphas):
+        alpha_val = float(alpha)
+        if not (0.0 < alpha_val < 1.0):
+            raise ValueError("alpha must be in (0,1) for VI.")
+        pred_set = uqmodel.predict(alpha, X_test,  X_train,  Y_train, X_cal, Y_cal, heuristic_u=heuristic_u, k=k)
+        coverage = _coverage(pred_set, Y_test)
+        sha = _sharpness(pred_set)
+        sdcv = _sdcv(pred_set)
+        interval_score = _interval_score(pred_set, Y_test, alpha)
 
-            results.append({
-                "alpha": alpha_val,
-                "coverage": coverage,
-                "sharpness": sha,
-                "sdcv": sdcv,
-                "interval score": interval_score
-            })
-    else:
-        results=[]
-        for alpha in tqdm(alphas):
-            alpha_val = float(alpha)
-            if not (0.0 < alpha_val < 1.0):
-                raise ValueError("alpha must be in (0,1) for VI.")
-            pred_set = uqmodel.predict(alpha, X_test,  X_train,  Y_train, X_cal, Y_cal, heuristic_u=heuristic_u, k=k)
-            coverage = _coverage(pred_set, Y_test)
-            sha = _sharpness(pred_set)
-            sdcv = _sdcv(pred_set)
-            interval_score = _interval_score(pred_set, Y_test, alpha)
-
-            results.append({
-                "alpha": alpha_val,
-                "coverage": coverage,
-                "sharpness": sha,
-                "sdcv": sdcv,
-                "interval score": interval_score
-            })
+        results.append({
+            "alpha": alpha_val,
+            "coverage": coverage,
+            "sharpness": sha,
+            "sdcv": sdcv,
+            "interval score": interval_score
+        })
     return pd.DataFrame(results)
 
     # else:
