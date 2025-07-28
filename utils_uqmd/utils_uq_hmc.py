@@ -4,7 +4,7 @@ import torch, math
 import torch.nn as nn
 from torch.func import functional_call          # still used for fast forward
 from tqdm.auto import trange                    # progress-bars
-
+import copy
 # -----------------------------------------------------------------------------
 # helpers
 # -----------------------------------------------------------------------------
@@ -25,7 +25,7 @@ def unflatten_params(model, theta_vec):
 # -----------------------------------------------------------------------------
 class HMCBPINN(nn.Module):
     """
-    Vectorised HMC (multi-chain) PINN with tqdm bars and device-safe grads.
+    Vectorised HMC PINN with tqdm bars and device-safe grads.
     """
     def __init__(self, pde_class, input_dim, hidden_dims, output_dim,
                  act_func=nn.Tanh, prior_std=1.0,
@@ -48,6 +48,7 @@ class HMCBPINN(nn.Module):
 
         self._posterior = []
         self._coloc_pt_num = None
+        self._num_params = sum(p.numel() for p in self.parameters())
 
     # ------------------------------------------------------------------
     # forward
@@ -82,155 +83,177 @@ class HMCBPINN(nn.Module):
                 "IC": ic_loss, "BC": bc_loss}
 
     # ------------------------------------------------------------------
-    # fit  (MAP + HMC)
+    # fit  (MAP + HMC)          <<<  DROP-IN REPLACEMENT
     # ------------------------------------------------------------------
     def fit(self, coloc_pt_num, X_train, Y_train,
             lam_pde=1., lam_ic=0., lam_bc=1., lam_data=1.,
             epochs=5000, lr=1e-3,
-            hmc_samples=2000, burn_in=500,
-            print_every=500, step_size=None, leapfrog_steps=None, **unused):
-        
-        if step_size is not None:
-            self.eps = step_size
-        if leapfrog_steps is not None:
-            self.L = leapfrog_steps
+            hmc_samples=5000, burn_in=500,
+            print_every=500, step_size=None, leapfrog_steps=None,
+            lr_decay_step=2000, lr_decay_gamma=0.5,
+            **unused):
+
+        # ── hyper-parameters ────────────────────────────────────────────
+        if step_size   is not None:  self.eps = step_size
+        if leapfrog_steps is not None: self.L = leapfrog_steps
 
         self._coloc_pt_num = coloc_pt_num
         X_train, Y_train = X_train.to(self.device), Y_train.to(self.device)
 
-        opt  = torch.optim.Adam(self.parameters(), lr=lr)
+        # ── 1️⃣  MAP optimisation ───────────────────────────────────────
+        opt = torch.optim.Adam(self.parameters(), lr=lr)
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            opt, step_size=lr_decay_step, gamma=lr_decay_gamma
+        )
         hist = {k: [] for k in ("Total", "Data", "PDE", "IC", "BC")}
-
-        # -------- 1️⃣ MAP optimisation ----------------------------------
-        map_bar = trange(1, epochs+1, desc="MAP", leave=False)
+        
+        map_bar = trange(1, epochs + 1, desc="MAP", leave=False)
         for ep in map_bar:
             opt.zero_grad()
             logL, parts = self._log_likelihood(X_train, Y_train,
-                                               lam_pde, lam_ic, lam_bc, lam_data)
+                                            lam_pde, lam_ic, lam_bc, lam_data)
             nlp = -(self._log_prior(flatten_params(self.parameters())) + logL)
-            nlp.backward(); opt.step()
+            nlp.backward()
+            opt.step()
+            scheduler.step()
 
             hist["Total"].append(nlp.item())
-            for k,v in parts.items(): hist[k].append(v.item())
+            for k, v in parts.items():
+                hist[k].append(v.item())
 
             if ep % print_every == 0 or ep == epochs:
                 map_bar.write(
-                    f"[MAP] epoch {ep:6d}  −logPost={nlp.item():.3e}  "
-                    + "  ".join(f"{k}={parts[k]:.3e}" for k in parts)
+                    f"[MAP] epoch {ep:6d} −logPost={nlp.item():.3e}  "
+                    + "  ".join(f"{k}={parts[k]:.2e}" for k in parts)
                 )
             map_bar.set_postfix(loss=f"{nlp.item():.2e}")
 
-        # -------- prepare θ0 for chains --------------------------------
+        # ── 2️⃣  HMC helpers ────────────────────────────────────────────
         θ0 = flatten_params(self.parameters()).detach().to(self.device)
-        θ0 = θ0.repeat(self.chains, 1)                     # (B,D)
+        θ0 = θ0.repeat(self.chains, 1)                       # (B, D)
 
-        # potential energy
-        def U_scalar(theta_vec):
-            unflatten_params(self, theta_vec)
-            logL, _ = self._log_likelihood(X_train, Y_train,
-                                           lam_pde, lam_ic, lam_bc, lam_data)
-            return -(self._log_prior(theta_vec) + logL)
+        def potential_and_grad(theta_mat):
+            """
+            theta_mat : (B, D)
+            returns   : U (B,), grad_U (B, D)
+            """
+            U_vals, grads = [], []
+            for θ in theta_mat:
+                # write θ into the network (no autograd link needed)
+                unflatten_params(self, θ)
 
-        def grad_U(theta_mat):                     # (B,D) → (B,D)
-            grads = []
-            for theta in theta_mat:                # loop over chains
-                theta = theta.detach().clone().requires_grad_(True)
+                logL, _ = self._log_likelihood(
+                    X_train, Y_train, lam_pde, lam_ic, lam_bc, lam_data
+                )
+                U = -(self._log_prior(θ) + logL)
 
-                # write the *views* of theta into the model — safe for autograd
-                unflatten_params(self, theta)
+                # clear & back-prop to collect param-grads
+                for p in self.parameters():
+                    if p.grad is not None:
+                        p.grad.zero_()
+                U.backward()
+                g = flatten_params(p.grad for p in self.parameters())
 
-                logL, _ = self._log_likelihood(X_train, Y_train,
-                                            lam_pde, lam_ic, lam_bc, lam_data)
-                U       = -(self._log_prior(theta) + logL)
-
-                g, = torch.autograd.grad(U, theta, retain_graph=False)
+                U_vals.append(U.detach())
                 grads.append(g.detach())
-            return torch.stack(grads, 0)
+            return torch.stack(U_vals), torch.stack(grads)
 
-
-        accept_cnt = 0
+        # ── 3️⃣  HMC sampling ────────────────────────────────────────────
+        self._posterior = []                      # keep list format
         θ = θ0.clone()
-        # print(f"Using step size: {self.eps}, Using Length: {self.L}")
-        g = grad_U(θ)
-        # print(f"∥∇U∥ (mean across chains): {g.norm(dim=1).mean().item():.3e}")
+        accept_cnt = 0
 
-        # -------- 2️⃣ HMC sampling ------------------------------------
-        hmc_bar = trange(1, hmc_samples+1, desc="HMC", leave=False)
+        hmc_bar = trange(1, hmc_samples + 1, desc="HMC", leave=False)
         for it in hmc_bar:
-            p = torch.randn_like(θ)
-            θ_curr, p_curr = θ.clone(), p.clone()
+            p0 = torch.randn_like(θ)
+            θ_prop, p = θ.clone(), p0.clone()
 
-            # half-step momentum
-            p = p - 0.5*self.eps*grad_U(θ)
+            # current energy & grad
+            U_curr, g = potential_and_grad(θ_prop)
 
-            θ_before = θ.clone()
+            # —— Leap-frog integrator ——
+            p = p - 0.5 * self.eps * g
+            for lf in range(self.L):
+                θ_prop = θ_prop + self.eps * p
+                U_prop, g = potential_and_grad(θ_prop)
+                if lf != self.L - 1:
+                    p = p - self.eps * g
+            p = p - 0.5 * self.eps * g
+            p = -p                                         # momentum flip
 
-            for _ in range(self.L):
-                θ = θ + self.eps*p
-                p = p - self.eps*grad_U(θ)
-            p = p - 0.5*self.eps*grad_U(θ)
-            p = -p                                          # Negate momentum
-            delta_theta = (θ - θ_before).norm(dim=1)
-            # print(f"Δθ (per chain): {delta_theta}")
-
-            # energies
-            U_curr = torch.stack([U_scalar(row) for row in θ_curr])
-            U_prop = torch.stack([U_scalar(row) for row in θ])
-            K_curr = 0.5*p_curr.pow(2).sum(dim=1)
-            K_prop = 0.5*p.pow(2).sum(dim=1)
-
-            delta_H = (U_prop + K_prop) - (U_curr + K_curr)
+            # —— Metropolis acceptance ——
+            K0    = 0.5 * p0.pow(2).sum(dim=1)
+            Kprop = 0.5 * p.pow(2).sum(dim=1)
+            delta_H = (U_prop + Kprop) - (U_curr + K0)
             acc_prob = torch.exp(-delta_H).clamp(max=1.0)
-            accept = (torch.rand_like(acc_prob) < acc_prob).view(-1, 1)
-            θ        = torch.where(accept, θ, θ_curr)
+            accept   = (torch.rand_like(acc_prob) < acc_prob).view(-1, 1)
+
+            θ = torch.where(accept, θ_prop, θ)
             accept_cnt += accept.float().sum().item()
 
+            # keep samples after burn-in
             if it > burn_in:
-                self._posterior.append(θ.clone().cpu())
+                self._posterior.append(θ.clone().cpu())    # list element (B, D)
 
+            # progress bar
             if it % print_every == 0 or it == hmc_samples:
                 hmc_bar.write(f"[HMC] iter {it:6d}  acc-rate={accept_cnt/it:.2f}")
-            
             hmc_bar.set_postfix(acc=f"{accept_cnt/it:.2f}")
 
-        print(f"Finished HMC: avg acceptance {accept_cnt / (hmc_samples * self.chains):.3f}")
-        print(f"Keep {len(self._posterior)} posterior sample from the HMC algo")
-        unflatten_params(self, θ[0])           # restore weights
+        print(f"Finished HMC: avg acceptance "
+            f"{accept_cnt / (hmc_samples * self.chains):.3f}")
+        print(f"Kept {len(self._posterior)} posterior samples")
+
+        # restore the final θ to the network
+        unflatten_params(self, θ[0])
         return hist
 
     @torch.no_grad()
-    def predict(self, alpha, X_test, use_chain=0,  **unused):
-        """Draw samples from the HMC posterior and return prediction bounds
-        with configurable confidence level."""
+    def predict(self, alpha, X_test,
+                X_train=None, Y_train=None,
+                X_cal=None,  Y_cal=None,
+                heuristic_u=None, k=None,
+                n_samples=5_000, if_return_mean=False):
+        if not self._posterior:
+            y = self(X_test)
+            return (y, y)
 
-        self.eval()
-        X_test = X_test.to(self.device)
+        saved_params = flatten_params(self.parameters()).detach().clone()
+        expected_numel = saved_params.numel()
         preds = []
 
-        for θ in self._posterior:
-            unflatten_params(self, θ[use_chain].to(self.device))
-            y_pred = self(X_test)
-            preds.append(y_pred.detach())
+        # Handle posterior storage format: list of [D] or a single [B,D] tensor
+        if isinstance(self._posterior, list):
+            posterior = torch.stack(self._posterior)
+        else:
+            posterior = self._posterior  # assume tensor already
 
-        preds = torch.stack(preds)  # shape: [n_samples, batch_size, output_dim]
-        mean = preds.mean(dim=0)
-        std = preds.std(dim=0)
+        sample_idx = torch.randint(0, posterior.shape[0], (n_samples,), device=self.device)
+        for idx in sample_idx:
+            theta = posterior[idx].flatten().to(self.device)
 
-        # Convert alpha value to z_score
-        alpha_tensor = torch.tensor([alpha / 2], device=X_test.device, dtype=torch.float32)
-        z_score = torch.distributions.Normal(0, 1).icdf(1 - alpha_tensor).abs().item()
+            if theta.numel() != expected_numel:
+                raise RuntimeError(f"Posterior θ shape mismatch: expected {expected_numel}, got {theta.numel()}")
+            unflatten_params(self, theta)
+            preds.append(self(X_test))
 
-        lower_bound = mean - z_score * std
-        upper_bound = mean + z_score * std
+        unflatten_params(self, saved_params)
 
-        return (lower_bound, upper_bound)
+        preds = torch.stack(preds)  # (S, N, 1)
+        μ, σ = preds.mean(0), preds.std(0)
+        z = torch.distributions.Normal(0, 1).icdf(torch.tensor(alpha / 2)).abs()
 
-    
+        if if_return_mean:
+            return (μ - z * σ, μ + z * σ), μ
+        else:
+            return (μ - z * σ, μ + z * σ)
+
+
 
     # ------------------------------------------------------------------
     # evaluation: test MSE
     # ------------------------------------------------------------------
-    @torch.inference_mode()
+    @torch.no_grad()
     def data_loss(self, X_test, Y_test):
         """Compute the data loss (MSE) on the given dataset."""
         X_test = X_test.to(self.device)

@@ -204,7 +204,8 @@ def plot_dual_expected_vs_empirical(
     cov_col='coverage',
     title1='Uncalibrated Model',
     title2='Calibrated Model',
-    dev_metric='mae'
+    dev_metric='mae',
+    **unused
 ):
     """
     Plots side-by-side coverage plots for uncalibrated and calibrated models,
@@ -259,7 +260,7 @@ def plot_dual_expected_vs_empirical(
     axes[1].legend()
 
     plt.tight_layout()
-    plt.show()
+
 
 
 
@@ -765,12 +766,12 @@ def plot_metrics_table(
     true_solution,
     df1: pd.DataFrame,
     df2: pd.DataFrame,
-    df1_name: str,
-    df2_name: str,
+    df1_name: str="Calibrated",
+    df2_name: str="Uncalibrated",
     title: str = "",
     main_title: str | None = None,
     X_vis=None, Y_vis=None,
-    alpha_level: float = 0.95,
+    alpha_level: float = 0.05,
     figsize: tuple = (9, 2.5),
     max_digits_display = lambda x: f"{x:.4g}"
 ):
@@ -778,6 +779,29 @@ def plot_metrics_table(
     Display a side-by-side metrics comparison (table) for the uncalibrated and
     calibrated models at a single alpha level.
     """
+    # Compute the coverage deviation using mae
+    def prepare_coverage_data(df):
+        expected = 1 - df["alpha"]
+        empirical = df["coverage"]
+        exp_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])], ignore_index=True)
+        emp_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])], ignore_index=True)
+        sort_idx = exp_full.argsort()
+        exp_sorted, emp_sorted = exp_full[sort_idx], emp_full[sort_idx]
+        return exp_sorted.to_numpy(), emp_sorted.to_numpy()
+
+    def coverage_deviation(exp, emp, how="mae"):
+        diff = np.abs(emp - exp)
+        if   how == "mae":  return diff.mean()
+        elif how == "rmse": return np.sqrt((diff**2).mean())
+        elif how == "max":  return diff.max()
+        else:
+            raise ValueError("metric must be 'mae', 'rmse', or 'max'")
+
+    exp1, emp1 = prepare_coverage_data(df1)
+    exp2, emp2 = prepare_coverage_data(df2)
+    dev1 = coverage_deviation(exp1, emp1)  # Using the default metrics
+    dev2 = coverage_deviation(exp2, emp2)  # Using the default metrics
+
     alpha_level_upper = alpha_level + 1e-3
     alpha_level_lower = alpha_level - 1e-3
     
@@ -785,28 +809,31 @@ def plot_metrics_table(
     row_uncal = df1.loc[(df1["alpha"] <= alpha_level_upper) & 
                            (df1["alpha"] >= alpha_level_lower)].copy()
     row_uncal["model"] = df1_name
-    row_uncal["actual alpha"] = 1-row_uncal["coverage"]
+    row_uncal["expected coverage"] = (1 - row_uncal["alpha"])
+    row_uncal["mean coverage deviation"] = "{:.4f}".format(dev1)
+    row_uncal["coverage"] = (row_uncal["coverage"]).map("{:.2f}".format)
 
     row_cal = df2.loc[(df2["alpha"] <= alpha_level_upper) & 
                         (df2["alpha"] >= alpha_level_lower)].copy()
     row_cal["model"] = df2_name
-    row_cal["actual alpha"] = 1-row_cal["coverage"]
+    row_cal["expected coverage"] = (1- row_cal["alpha"])
+    row_cal["mean coverage deviation"] = "{:.4f}".format(dev2)
+    row_cal["coverage"] = (row_cal["coverage"]).map("{:.2f}".format)
 
     if row_uncal.empty or row_cal.empty:
         raise ValueError(f"alpha={alpha_level} not found in both data frames.")
 
     # ───────────────────── 2. Stack & tidy up ──────────────────────────
     rows = pd.concat([row_uncal, row_cal], axis=0).reset_index(drop=True)
-    
+    rows = rows.rename(columns={"coverage": "actual coverage"})
     # Get all columns except 'model' for the selection
     other_cols = [c for c in rows.columns if c != "model"]
     rows = rows.loc[:, ["model"] + other_cols]
 
-    rows = rows.rename(columns={"alpha": "expected alpha"})
     
     # nice ordering: model | expected alpha | true alpha | <metrics…>
-    metric_cols = [c for c in rows.columns if c not in ("model", "expected alpha", "actual alpha")]
-    rows = rows[["model", "expected alpha", "actual alpha"] + metric_cols]
+    metric_cols = [c for c in rows.columns if c not in ("model", "expected coverage", "actual coverage", "mean coverage deviation", "sharpness")]
+    rows = rows[["model", "expected coverage", "actual coverage", "mean coverage deviation", "sharpness"]]
     
 
     # ──────────────── 2.5. Format numeric values ───────────────────────
@@ -822,7 +849,6 @@ def plot_metrics_table(
     table = ax.table(
         cellText=rows.values,
         colLabels=rows.columns,
-        rowLabels=rows["model"].tolist(),
         loc="center",
         cellLoc="center",
     )

@@ -20,7 +20,7 @@ def clear_memory(*vars_to_delete):
     gc.collect()
 
 
-def save_plot(plot_fn, save_dir="plots", prefix="plot", params=None, loss=None, fmt="png"):
+def save_plot(plot_fn, save_dir="plots", prefix="plot", params=None, loss=None, fmt="pdf"):
     """
     Returns a wrapped plotting function that saves the plot with hyperparameter info.
 
@@ -41,7 +41,7 @@ def save_plot(plot_fn, save_dir="plots", prefix="plot", params=None, loss=None, 
         # Format filename
         param_str = ",".join(f"{k}_{str(v).replace('.', '_')}" for k, v in (params or {}).items())
         loss_str = f"loss_{loss:.3e}" if loss is not None else ""
-        filename = f"{loss_str}; " + " ".join(filter(None, [prefix, param_str])) + f".{fmt}"
+        filename = "Model: ".join(filter(None, [prefix, param_str])) + f"; {loss_str}" + f".{fmt}"
         filepath = os.path.join(save_dir, filename)
 
         # Plot and save
@@ -96,7 +96,7 @@ def hyperparameter_tuning(
     Returns:
         best_params: The hyperparameter combination with the lowest loss.
     """
-
+    initial_state = copy.deepcopy(uqmodel.state_dict())
     best_loss = float("inf")
     best_params = None
 
@@ -105,18 +105,19 @@ def hyperparameter_tuning(
     combinations = list(itertools.product(*values))
 
     for combo in combinations:
-        uqmodel_copy = copy.deepcopy(uqmodel)
         hyperparams = dict(zip(keys, combo))
         print(f"\n[🔎] Trying: {hyperparams}")
+        uqmodel.load_state_dict(initial_state, strict=True)
+        uqmodel._posterior = []          # forget any earlier samples
 
         # Baseline Model
         print(f"\n[🟠] Training...")
-        baseline_loss_dict = uqmodel_copy.fit(**fit_args, **hyperparams)
+        baseline_loss_dict = uqmodel.fit(**fit_args, **hyperparams)
 
         # Compute the baseline model's data loss
         if (X_validation is None) or (Y_validation is None):
             raise TypeError("Missing validation data `X_validation` or `Y_validation")
-        baseline_data_loss = uqmodel_copy.data_loss(X_validation, Y_validation)
+        baseline_data_loss = uqmodel.data_loss(X_validation, Y_validation)
 
         if baseline_data_loss < best_loss:
             best_loss = baseline_data_loss
@@ -124,13 +125,13 @@ def hyperparameter_tuning(
 
         print(f"\n[🟠] Base Model Inferencing...")
         # Baseline Model Prediction
-        cp_uncal_predset = uqmodel_copy.predict(
+        cp_uncal_predset = uqmodel.predict(
             alpha=alpha, X_test=X_test,
             **baseline_pred_kwargs
         )
         print(f"\n[🟠] CP Model Inferencing...")
         # CP+ Model
-        cp_model = CP(uqmodel_copy)
+        cp_model = CP(uqmodel)
         # CP+ Model Prediction
 
         cp_cal_predset = cp_model.predict(
@@ -140,7 +141,7 @@ def hyperparameter_tuning(
     
         # Compute the metrics and coverage plots
         print(f"\n[🟠] Computing Coverage...")
-        df_uncal = baseline_test_uncertainties(uqmodel=uqmodel_copy, **baseline_testing_args)
+        df_uncal = baseline_test_uncertainties(uqmodel=uqmodel, **baseline_testing_args)
         df_cal = cp_test_uncertainties(cp_model, **cp_testing_args)
         
         print(f"\n[✅] Data Loss = {baseline_data_loss:.3e}")
@@ -157,12 +158,11 @@ def hyperparameter_tuning(
           title=plot_title, main_title=main_title, X_vis=X_vis, Y_vis=Y_vis)
         
         clear_memory(
-            uqmodel_copy, cp_model,
+            cp_model,
             cp_uncal_predset, cp_cal_predset,
             df_uncal, df_cal,
             plotting_func
         )
-
 
     print(f"\n[🏆] Best Hyperparameters: {best_params} with Loss: {best_loss:.4f}")
     return best_params
@@ -203,7 +203,7 @@ def hyperparameter_tuning_higher_dimensional(
     Returns:
         best_params: The hyperparameter combination with the lowest loss.
     """
-
+    initial_state = copy.deepcopy(uqmodel.state_dict())
     best_loss = float("inf")
     best_params = None
 
@@ -212,18 +212,20 @@ def hyperparameter_tuning_higher_dimensional(
     combinations = list(itertools.product(*values))
 
     for combo in combinations:
-        uqmodel_copy = copy.deepcopy(uqmodel)
+        # uqmodel = copy.deepcopy(uqmodel)
         hyperparams = dict(zip(keys, combo))
         print(f"\n[🔎] Trying: {hyperparams}")
-
+        uqmodel.load_state_dict(initial_state, strict=True)
+        uqmodel._posterior = [] 
+        
         # Baseline Model
         print(f"\n[🟠] Training...")
-        baseline_loss_dict = uqmodel_copy.fit(**fit_args, **hyperparams)
+        baseline_loss_dict = uqmodel.fit(**fit_args, **hyperparams)
 
         # Compute the baseline model's data loss
         if (X_validation is None) or (Y_validation is None):
             raise TypeError("Missing validation data `X_validation` or `Y_validation")
-        baseline_data_loss = uqmodel_copy.data_loss(X_validation, Y_validation)
+        baseline_data_loss = uqmodel.data_loss(X_validation, Y_validation)
 
         if baseline_data_loss < best_loss:
             best_loss = baseline_data_loss
@@ -231,12 +233,12 @@ def hyperparameter_tuning_higher_dimensional(
 
         print(f"\n[🟠] Inferencing...")
         # Baseline Model Prediction
-        cp_uncal_predset = uqmodel_copy.predict(
+        cp_uncal_predset = uqmodel.predict(
             alpha=alpha, X_test=X_test,
             **baseline_pred_kwargs
         )
         # CP+ Model
-        cp_model = CP(uqmodel_copy)
+        cp_model = CP(uqmodel)
         # CP+ Model Prediction
         cp_cal_predset = cp_model.predict(
             alpha=alpha, X_test=X_test,
@@ -265,7 +267,7 @@ def hyperparameter_tuning_higher_dimensional(
         )(uncal_95rslt_row, cal_95rslt_row)
 
         clear_memory(
-            uqmodel_copy, cp_model,
+            uqmodel, cp_model,
             cp_uncal_predset, cp_cal_predset,
             df_uncal, df_cal,
             plotting_func

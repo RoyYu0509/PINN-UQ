@@ -32,23 +32,28 @@ class CP:
     # ════════════════════════════════════════════════════════════════
     # 1️⃣  k-NN helper functions
     # ════════════════════════════════════════════════════════════════
-    def _feature_distance(self, X_cal, X_train, k):
-        X_cal   = _to_numpy(X_cal)
+    def _feature_distance(self, X_test, X_train, k):
+        X_test_np = X_test.clone().detach()
+        mean = self.model(X_test_np.to(self.device))
+        X_test = _to_numpy(X_test)
         X_train = _to_numpy(X_train)
         nbrs = NearestNeighbors(n_neighbors=k).fit(X_train)
-        distances, _ = nbrs.kneighbors(X_cal)
-        return distances.mean(axis=1)               # (N_cal,)
+        distances, _ = nbrs.kneighbors(X_test)
+        return distances.mean(axis=1), mean              # (N_cal,)
 
-    def _latent_distance(self, X_cal, X_train, k):
+    def _latent_distance(self, X_test, X_train, k):
+        X_test_np = X_test.clone().detach()
+        mean = self.model(X_test_np.to(self.device))
         self.model.eval()
         with torch.no_grad():
-            H_cal = self.model(X_cal.to(self.device),   return_hidden=True)[1]
+            H_cal = self.model(X_test.to(self.device),   return_hidden=True)[1]
             H_trn = self.model(X_train.to(self.device), return_hidden=True)[1]
         H_cal   = _to_numpy(H_cal)
         H_trn   = _to_numpy(H_trn)
         nbrs = NearestNeighbors(n_neighbors=k).fit(H_trn)
         distances, _ = nbrs.kneighbors(H_cal)
-        return distances.mean(axis=1)
+
+        return distances.mean(axis=1), mean
 
     # ════════════════════════════════════════════════════════════════
     # 2️⃣  Raw predictive width
@@ -57,8 +62,9 @@ class CP:
         """Return (upper-lower) from the model’s own `predict` method."""
         self.model.eval()
         pred_set = self.model.predict(alpha, X)
+        y_pred = (pred_set[1] + pred_set[0])/2
         width = (pred_set[1] - pred_set[0]).squeeze(-1)    # (N,)
-        return _to_numpy(width)
+        return _to_numpy(width), y_pred.cpu().numpy()
 
     # ════════════════════════════════════════════════════════════════
     # 3️⃣  Conformal scores on the *calibration* set
@@ -67,21 +73,27 @@ class CP:
         with torch.no_grad():
             Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
         residual   = np.abs(Y_cal - Y_pred)                # (N_cal, out_dim)
-        dist_feat  = np.maximum(self._feature_distance(X_cal, X_train, k), eps)
+        dist_feat_tensor, _ = self._feature_distance(X_cal, X_train, k)
+        dist_feat = np.maximum(_to_numpy(dist_feat_tensor), eps)
         return residual / dist_feat[:, None]               # (N_cal, out_dim)
 
     def _conf_metric_latent(self, X_cal, Y_cal, X_train, k, eps=1e-8):
         with torch.no_grad():
             Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
         residual   = np.abs(Y_cal - Y_pred)
-        dist_lat   = np.maximum(self._latent_distance(X_cal, X_train, k), eps)
+        dist_lat_tensor, _ = self._latent_distance(X_cal, X_train, k)
+        dist_lat = np.maximum(_to_numpy(dist_lat_tensor), eps)
         return residual / dist_lat[:, None]
 
     def _conf_metric_rawstd(self, alpha, X_cal, Y_cal, X_train, eps=1e-8):
         with torch.no_grad():
-            Y_pred = self.model(X_cal.to(self.device)).cpu().numpy()
+            pred_set = self.model.predict(alpha, X_cal.to(self.device))
+        hi = pred_set[1].cpu().numpy()
+        lo = pred_set[0].cpu().numpy()
+        Y_pred = (hi + lo)/2
+        width = np.maximum((hi - lo).squeeze(-1), eps)
         residual   = np.abs(Y_cal - Y_pred)
-        width      = np.maximum(self._rawstd(alpha, X_cal), eps)    # (N_cal,)
+        # width      = np.maximum(self._rawstd(alpha, X_cal), eps)    # (N_cal,)s
         assert residual.shape[0] == width.shape[0], "Residual/width length mismatch"
         return residual / width[:, None]
 
@@ -96,8 +108,7 @@ class CP:
         X_train=None,  Y_train=None,
         X_cal=None,   Y_cal=None,
         heuristic_u="feature",
-        k=10,
-        hmc_mean=None
+        k=10
     ):
         """
         Parameters
@@ -105,52 +116,53 @@ class CP:
         alpha : float      desired mis-coverage (e.g. 0.05)
         heuristic_u : str  'feature' | 'latent' | 'raw_std'
         k : int            nearest-neighbour count for k-NN heuristics
-        hmc_mean: must enter for the HMC model in order to inference properly
         """
         # 0️⃣  deterministic run
         torch.manual_seed(0); np.random.seed(0); random.seed(0)
         torch.use_deterministic_algorithms(True)
         self.model.eval()
-        is_hmc = isinstance(self.model, HMCBPINN)
 
         # --- choose conformity metric ----------------------------------------
         if heuristic_u == "feature":
             cal_scores = self._conf_metric_feature(X_cal, Y_cal, X_train, k)
-            test_u     = self._feature_distance(X_test, X_train, k)
+            test_u, mean    = self._feature_distance(X_test, X_train, k)
         elif heuristic_u == "latent":
             cal_scores = self._conf_metric_latent(X_cal, Y_cal, X_train, k)
-            test_u     = self._latent_distance(X_test, X_train, k)
+            test_u, mean   = self._latent_distance(X_test, X_train, k)
         elif heuristic_u == "raw_std":
             cal_scores = self._conf_metric_rawstd(alpha, X_cal, Y_cal, X_train)
-            test_u     = self._rawstd(alpha, X_test)
+            test_u, mean     = self._rawstd(alpha, X_test)
         else:
             raise ValueError("heuristic_u must be 'feature', 'latent' or 'raw_std'")
 
         # --- quantile on calibration scores ----------------------------------
         n_cal = cal_scores.shape[0]
+
+        # Compute the conformal quantile level
+        q = np.ceil((n_cal + 1) * (1 - float(alpha))) / n_cal
+        q = np.clip(q, 0.0, 1.0 - 1e-12)     # keep within [0,1)
+
         q_hat = np.quantile(
             cal_scores,
-            np.ceil((n_cal + 1) * (1 - alpha)) / n_cal,
+            q,
             axis=0,
             method="higher"
-        )                                                # (out_dim,)
+        )
+                                       # (out_dim,)
 
-        # --- point predictions on X_test --------------------------------------
-        if is_hmc:
-            if hmc_mean is None:
-                raise RuntimeError("Need to enter the hmc model's mean")
-            else:
-                y_pred_test = hmc_mean.cpu().numpy()
-        else:
-            with torch.no_grad():
-                self.model.eval()
-                pred_set = self.model.predict(alpha, X_test.to(self.device))
-                uncal_low, uncal_high = pred_set[0], pred_set[1]
-                y_pred_test = ((uncal_low + uncal_high)/2).cpu().numpy()
-
+        # # --- point predictions on X_test --------------------------------------
+        # with torch.no_grad():
+        #     self.model.eval()
+        #     y_pred_test = self.model(X_test.to(self.device)).cpu().numpy()
+            
         # --- build intervals --------------------------------------------------
         eps  = q_hat * test_u[:, None]                   # (N_test, out_dim)
-        lower = torch.from_numpy(y_pred_test - eps).to(self.device)
-        upper = torch.from_numpy(y_pred_test + eps).to(self.device)
+        if isinstance(mean, torch.Tensor):
+            lower = (mean - torch.tensor(eps, dtype=mean.dtype, device=self.device))
+            upper = (mean + torch.tensor(eps, dtype=mean.dtype, device=self.device))
+        else:
+            lower = torch.tensor(mean - eps, dtype=torch.float32, device=self.device)
+            upper = torch.tensor(mean + eps, dtype=torch.float32, device=self.device)
+
 
         return (lower, upper)

@@ -126,7 +126,7 @@ class VIBPINN(BayesianFeedForwardNN):
         self, alpha,
         X_test,  
         # ----------- kwargs --------------- 
-        n_samples=5000
+        n_samples=20000
     ):
         """Draw samples from the variational posterior and return prediction bounds
         with configurable confidence level."""

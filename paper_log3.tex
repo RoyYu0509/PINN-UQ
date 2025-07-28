@@ -1,0 +1,693 @@
+
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amssymb}
+\rmfamily{\fontsize{12pt}{\baselineskip}\selectfont}
+
+% \linespread{1.1}  % 1.5 倍行距
+
+\usepackage{graphicx}
+\usepackage{amsfonts, amsmath, amssymb, amsbsy, amsthm}
+\usepackage{bm}
+\usepackage{color}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows}
+\tikzstyle{block} = [rectangle, draw, fill=gray!20, text width=7em, text centered, rounded corners, minimum height=2em, font=\small]
+\tikzstyle{line} = [draw, -latex']
+\tikzstyle{dashedline} = [draw, -latex', dashed]  % 定义虚线样式
+% \usepackage{float}
+\usepackage{hyperref}
+\usepackage{mathrsfs}
+\usepackage{longtable}
+\usepackage[top=2.5cm,bottom=2.0cm,left=2.0cm,right=2.0cm]{geometry}
+\usepackage{epstopdf}
+% \usepackage{mathabx}
+\usepackage{stmaryrd}
+\usepackage[normalem]{ulem}
+\usepackage{cancel}
+\usepackage{scalerel}
+\usepackage{enumitem}
+\usepackage{algorithm}
+%\usepackage{showkeys}
+\usepackage{subfigure}
+% \usepackage[demo]{graphics}
+% \usepackage{subcaption}
+% \usepackage{caption}
+% \usepackage{subfig}
+\usepackage{algorithm, algorithmicx}
+% \usepackage{lineno}
+\usepackage[noend]{algpseudocode}
+\usepackage{lineno}
+\usepackage{enumitem}
+\usepackage{diagbox}
+\usepackage{multirow}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\renewcommand{\algorithmiccomment}[1]{\bgroup\hfill//~#1\egroup}
+%% The amsthm package provides extended theorem environments
+%% \usepackage{amsthm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+%% The lineno packages adds line numbers. Start line numbering with
+%% \begin{linenumbers}, end it with \end{linenumbers}. Or switch it on
+%% for the whole article with \linenumbers.
+%% \usepackage{lineno}
+
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{assumption}{Assumption}[section]
+\newtheorem{lemma}{Lemma}[section]
+\usepackage{amsthm} % ensure you have this
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{definition}{Definition}[section]
+\newtheorem{corollary}{Corollary}[section]
+%\newtheorem{algorithm}{Algorithm}[section]
+\newtheorem{example}{Example}[section]
+\renewcommand{\theequation}{\arabic{section}.\arabic{equation}}
+\renewcommand{\thetheorem}{\arabic{section}.\arabic{theorem}}
+\renewcommand{\thelemma}{\arabic{section}.\arabic{lemma}}
+\renewcommand{\theproposition}{\arabic{section}.\arabic{proposition}}
+\renewcommand{\thedefinition}{\arabic{section}.\arabic{definition}}
+\renewcommand{\thecorollary}{\arabic{section}.\arabic{corollary}}
+%\renewcommand{\thealgorithm}{\arabic{section}.\arabic{algorithm}}
+\renewcommand{\theexample}{\arabic{section}.\arabic{example}}
+%\renewcommand{\thefigure}{\arabic{section}.\arabic{figure}}
+
+\def\alist{\renewcommand{\labelenumi}{(\alph{enumi})}}
+\def\ilist{\renewcommand{\labelenumi}{(\roman{enumi})}}
+
+\newcommand\tbbint{{-\mkern -16mu\int}}
+\newcommand\tbint{{\mathchar '26\mkern -14mu\int}}
+\newcommand\dbbint{{-\mkern -19mu\int}}
+\newcommand\dbint{{\mathchar '26\mkern -18mu\int}}
+\newcommand\bint{
+{\mathchoice{\dbint}{\tbint}{\tbint}{\tbint}}
+}
+\newcommand\bbint{
+{\mathchoice{\dbbint}{\tbbint}{\tbbint}{\tbbint}}
+}
+
+%++++++++++++++++++++++++++++++++++++++++
+% ADDITIONAL USER-DEFINED FUNCTIONALITY
+%++++++++++++++++++++++++++++++++++++++++
+% Add some shortcuts
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+
+% chho
+\newcommand{\bfX}{\mathbf{X}}
+\newcommand{\bfY}{\mathbf{Y}}
+\newcommand{\bfF}{\mathbf{F}}
+\newcommand{\bfk}{\mathbf{k}}
+\newcommand{\bfPsi}{{\Psi}}
+\newcommand{\bfTheta}{{\Theta}}
+\newcommand{\bfSigma}{\Sigma}
+\newcommand{\bfmu}{\mu}
+
+
+\def\msl{{\{\hspace{-0.75ex}\{}}
+\def\msr{{\}\hspace{-0.75ex}\}}}
+\def\mslb{{\big\{\hspace{-0.95ex}\big\{}}
+\def\msrb{{\big\}\hspace{-0.95ex}\big\}}}
+\def\mslB{{\Big\{\hspace{-1ex}\Big\{}}
+\def\msrB{{\Big\}\hspace{-1ex}\Big\}}}
+
+
+
+% comment functionality
+\newcommand{\co}[1]{{\color{red} #1}}
+\newcommand{\cco}[1]{{\small \color{red} \tt [CO: #1]}}
+\newcommand{\ys}[1]{{\color{blue} #1}}
+\newcommand{\cys}[1]{{\small \color{blue} \tt [YS: #1]}}
+\newcommand{\chho}[1]{{\small \color{purple} #1}}
+\newcommand{\cchho}[1]{{\small \color{purple} \tt [chho: #1]}}
+\newcommand{\zhao}[1] {{\color{blue} #1}}
+
+\newcommand{\cyf}[1]{{\small \color{pink} \tt [YF: #1]}}
+
+% ------------------------------------------------------------------
+% Section heading formatting (elsarticle + titlesec)
+% ------------------------------------------------------------------
+\usepackage{titlesec}
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{4}
+
+% ---------- numbering with trailing dots ----------
+\renewcommand\thesection{\arabic{section}.}
+\renewcommand\thesubsection{\thesection\arabic{subsection}.}
+\renewcommand\thesubsubsection{\thesubsection\arabic{subsubsection}.}
+\renewcommand\theparagraph{\thesubsubsection\arabic{paragraph}.}
+
+% ---------- \section ----------
+\titleformat{\section}[block]
+  {\normalfont\large\bfseries}
+  {\thesection}{1em}{}
+\titlespacing*{\section}
+  {0pt}{3.5ex plus 1ex minus .2ex}{2.3ex plus .2ex}
+
+% ---------- \subsection ----------
+\titleformat{\subsection}[block]
+  {\normalfont\normalsize\bfseries}
+  {\thesubsection}{1em}{}
+\titlespacing*{\subsection}
+  {0pt}{3.25ex plus 1ex minus .2ex}{1.5ex plus .2ex}
+
+% ---------- \subsubsection (bold as you asked) ----------
+\titleformat{\subsubsection}[block]
+  {\normalfont\normalsize\bfseries}
+  {\thesubsubsection}{1em}{}
+\titlespacing*{\subsubsection}
+  {0pt}{1.7ex plus .8ex minus .2ex}{1.2ex plus .2ex}
+
+% ---------- \paragraph (block, italic or bold? choose one) ----------
+\titleformat{\paragraph}[block]
+  {\normalfont\normalsize\itshape}    % or \bfseries if you prefer bold
+  {\theparagraph}{1em}{}
+\titlespacing*{\paragraph}
+  {0pt}{1.2ex plus .2ex minus .2ex}{0.6ex}
+
+% ---------- \subparagraph (run-in, unnumbered) ----------
+\titleformat{\subparagraph}[runin]
+  {\normalfont\normalsize\itshape}
+  {}{0pt}{}
+\titlespacing{\subparagraph}
+  {0pt}{0.4ex plus .1ex}{0.8em}
+
+% \journal{}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{A Conformal Prediction Framework for Uncertainty Quantification in Physics-Informed Neural Networks}
+
+\author[nusaddress]{Yifan Yu}
+
+\author[ubcaddress]{Cheuk Hin Ho}
+
+\author[nusaddress]{Yangshuai Wang}
+\ead{yswang@nus.edu.sg}
+
+\address[nusaddress]{Department of Mathematics, National University of Singapore, 10 Lower Kent Ridge Road, 119076, Singapore.}
+
+\address[ubcaddress]{Department of Mathematics, University of British Columbia, Vancouver, V6T1Z2, Canada.}
+
+\begin{abstract}
+Physics-Informed Neural Networks (PINNs) have become a promising approach for solving partial differential equations by integrating physical constraints into the training process. However, their deterministic nature limits their ability to quantify predictive uncertainty, which is critical for robust and trustworthy scientific computing. In this paper, we propose a conformal prediction (CP)-based uncertainty quantification (UQ) framework for PINNs that is distribution-free and provides statistically valid prediction intervals. The method constructs nonconformity scores on a calibration dataset and generates output intervals with guaranteed coverage. To further improve adaptivity and local accuracy, we extend standard CP by introducing residual-based nonconformity and local conformal quantile estimation. This enables spatially adaptive UQ that reflects the solution structure and underlying physics. We evaluate the proposed approach on several benchmark PDEs, including Poisson, Burgers, and Allen–Cahn equations, across one-, two-, and three-dimensional settings. Results show that our method effectively identifies epistemic uncertainty and provides reliable uncertainty estimates, bridging deterministic PINN modeling with distribution-free UQ.
+\end{abstract}
+
+%%%Graphical abstract
+%\begin{graphicalabstract}
+%%\includegraphics{grabs}
+%\end{graphicalabstract}
+
+% %%Research highlights
+% \begin{highlights}
+% \item Rigorous framework to explain generalisation of machine-learned interatomic potentials
+% \item Quantify prediction error in terms of training data 
+% \item Towards rigorous MLIPs workflow for materials defects
+% \item Numerical experiments validate and refine MLIPs best practices
+% \end{highlights}
+
+% \begin{keyword}
+% %% keywords here, in the form: keyword \sep keyword
+% machine-learned interatomic potentials \sep foundation models \sep fine-tuning \sep benchmark \sep molecular 
+% %% PACS codes here, in the form: \PACS code \sep code
+% %% MSC codes here, in the form: \MSC code \sep code
+% %% or \MSC[2008] code \sep code (2000 is the default)
+
+% \end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:intro}
+
+% PINN
+Physics-Informed Neural Networks (PINNs) have emerged as a flexible and effective framework for solving partial differential equations (PDEs) by embedding physical laws directly into the loss function of neural networks~\cite{raissi_physics-informed_2019, karniadakis2021physics, mcclenny2023self}. Unlike traditional mesh-based solvers~\cite{reddy1993introduction, patera1984spectral}, PINNs approximate PDE solutions by minimizing a composite loss that enforces the governing equations, boundary conditions, and initial conditions. This mesh-free formulation enables PINNs to handle complex geometries~\cite{xiang2022hybrid}, irregular or sparse data~\cite{oldenburg2022geometry}, and inverse problems~\cite{lu2021physics} in a unified manner. PINNs have been applied to a wide range of problems in scientific and engineering domains, such as fluid dynamics~\cite{cai_physics-informed_fluid_2021}, heat transfer~\cite{cai_physics-informed_heat_2021-1}, and materials modeling~\cite{misyris_physics-informed_2020}. For comprehensive reviews of PINNs in PDE learning, we refer readers to~\cite{cuomo2022scientific,  de2024numerical}. Despite their versatility, PINNs are typically trained deterministically, making it difficult to quantify the uncertainty in their predictions.
+
+Uncertainty quantification (UQ) plays a vital role in scientific computing, especially when model predictions inform critical decisions or downstream simulations~\cite{zou2024neuraluq, roy2011comprehensive}. For PDE solvers based on neural networks, predictive uncertainty can arise from limited data~\cite{chatfield1995model}, model misspecification~\cite{uppal2003model}, or non-convex optimization landscapes~\cite{gadat2022asymptotic}. In the context of PINNs, these challenges are amplified due to the lack of a probabilistic formulation and the high-dimensional nature of the solution space.
+
+Several UQ strategies have been proposed for PINNs, including dropout-based Bayesian approximations~\cite{alhajeri_physics-informed_2022}, ensemble methods~\cite{haitsiukevich_improved_2023}, and stochastic gradient perturbations~\cite{fu2014stochastic}. Among them, Bayesian Physics-Informed Neural Networks (B-PINNs)~\cite{yang_b-pinns_2021} extend the standard PINN by introducing Bayesian inference to the deterministic model~\cite{linka_bayesian_2022}, enabling posterior inference over the PDE solution or parameters via methods such as Hamiltonian Monte Carlo (HMC)~\cite{yang_b-pinns_2021, betancourt2017conceptual} or variational inference (VI)~\cite{yang_b-pinns_2021, blundell_weight_2015}. Alternatively, Monte Carlo dropout~\cite{gal_dropout_2016} can approximate uncertainty by generating an ensemble of predictions through random neuron dropout. However, these approaches often rely on strong distributional assumptions and lack rigorous theoretical guarantees. This motivates the development of alternative UQ frameworks that are both distribution-free and statistically principled, without requiring explicit probabilistic modeling of the solution space.
+
+Conformal prediction (CP) is a statistically principled framework for uncertainty quantification that yields distribution-free prediction intervals with guaranteed coverage under minimal assumptions, such as data exchangeability or i.i.d.~\cite{shafer2008tutorial, angelopoulos2023conformal}. As a post hoc wrapper, CP can be applied to any pre-trained model to construct prediction intervals that satisfy user-specified confidence levels (e.g., 90\% or 95\%) without requiring access to the model internals. In recent years, CP has attracted growing attention in the scientific machine learning community due to its flexibility, theoretical guarantees, and computational efficiency. For instance, Hu et al.~\cite{hu_robust_2022} combined CP with latent-space distance metrics to produce well-calibrated intervals for neural network-based interatomic potentials. In the context of PDE learning, Moya et al.~\cite{moya_conformalized-deeponet_2025} incorporated CP into Deep Operator Networks (DeepONets), achieving finite-sample coverage guarantees for operator learning tasks. Gopakumar et al.~\cite{gopakumar_uncertainty_2024} further demonstrated the applicability of CP-based UQ to surrogate modeling across spatio-temporal domains, including PDE solvers and weather forecasting. Collectively, these studies underscore the growing promise of CP as a reliable and general-purpose tool for uncertainty quantification in scientific modeling.
+
+Despite these advances, to the best of our knowledge, no prior work has explored the integration of conformal prediction with PINNs or their Bayesian variants B-PINNs. Existing CP-based UQ methods in scientific machine learning have primarily focused on surrogate models and operator networks, without addressing the unique structure of PINNs, which enforce physical laws through soft constraint losses. Furthermore, a systematic evaluation of CP-based UQ in the context of PDE solution modeling remains lacking. This gap highlights a compelling opportunity to combine the strengths of CP with physics-informed modeling, enabling uncertainty estimates that are both theoretically grounded and practically effective for PDE-based tasks.
+
+% 
+In this work, we develop a conformal prediction-based UQ framework for PINNs that is distribution-free and statistically grounded. Our method constructs nonconformity scores on a held-out calibration set and generates prediction intervals with guaranteed coverage under minimal assumptions. To address the lack of adaptivity in standard CP, we introduce a residual-based nonconformity score and a localized quantile estimation strategy, enabling spatially adaptive uncertainty estimates that reflect the underlying solution structure. We consider both deterministic and Bayesian variants of PINNs. For deterministic PINNs, we design a distance-based CP scheme that wraps around the trained model without modifying its architecture or training procedure. For B-PINNs, we propose a scaled conformal method that calibrates the heuristic predictive variance using conformal quantiles, thereby producing more reliable and interpretable uncertainty intervals. These methods are implemented on a suite of benchmark PDEs, including the Poisson, Burgers, and Allen–Cahn equations, across one-, two-, and three-dimensional domains. Extensive experiments demonstrate that our approach consistently improves the reliability of PINN and B-PINN predictions. The generated intervals are sharp, well-calibrated, and capable of identifying regions of high epistemic uncertainty. This work bridges the gap between physics-informed modeling and distribution-free UQ, and provides a modular, extensible framework for uncertainty-aware scientific computing.
+
+\subsection*{Outline}
+The remainder of this paper is organized as follows. Section~\ref{sec:pinn} reviews the formulation of physics-informed neural networks and discusses common sources of uncertainty in PINN-based models. Section~\ref{sec:cp} introduces the proposed conformal prediction frameworks for both deterministic and Bayesian PINNs. Section~\ref{sec:numerics} presents numerical experiments on benchmark PDEs across 1D, 2D, and 3D settings, with detailed evaluations of uncertainty quantification performance. Section~\ref{sec:extension} discusses possible extensions of the proposed method, including localized CP strategies. Finally, Section~\ref{sec:conclusion} concludes the paper and outlines future directions.
+
+\section{Background: Physics-Informed Neural Networks}
+\label{sec:pinn}
+
+In this section, we provide a brief overview of physics-informed neural networks (PINNs). In Section~\ref{sec:sub:basics}, we introduce the fundamental formulation of PINNs, which serves as the foundation for our proposed method. In Section~\ref{sec:sub:analysis}, we discuss existing analytical perspectives on PINNs and clarify their connection to uncertainty quantification.
+
+\subsection{Basic Framework}
+\label{sec:sub:basics}
+
+Let $\Omega \subset \mathbb{R}^d$ be a bounded spatial domain and $T > 0$ a final time. We consider the generic initial-boundary value problem (IBVP) of a system of partial differential equations (PDEs) for a solution field $u: \Omega \times [0, T] \to \mathbb{R}^{n_f}$:
+\begin{align}
+\mathcal{L}[u](\mathbf{x},t) &= f(\mathbf{x},t), &&\quad (\mathbf{x},t) \in \Omega \times (0,T], \label{eq:pde}\\
+u(\mathbf{x},0) &= u_0(\mathbf{x}), &&\quad \mathbf{x} \in \Omega, \label{eq:ic} \\
+\mathcal{B}[u](\mathbf{x},t) &= g(\mathbf{x},t), &&\quad (\mathbf{x},t) \in \partial\Omega \times (0,T], \label{eq:bc}
+\end{align}
+where $\mathcal{L}[\cdot]$ is a (possibly nonlinear) differential operator acting on $u$, $f$ is a known source term, and $\mathcal{B}[\cdot]$ denotes a boundary operator, such as Dirichlet or Neumann conditions. The functions $u_0$ and $g$ specify the initial and boundary data, respectively.
+
+Physics-Informed Neural Networks (PINNs) aim to approximate the solution $u$ using a neural network $u_\theta : \Omega \times [0,T] \to \mathbb{R}^{n_f}$, parameterized by $\theta \in \mathbb{R}^P$. The surrogate $u_\theta$ is trained to simultaneously satisfy the governing PDE~\eqref{eq:pde}, along with its associated initial and boundary conditions~\eqref{eq:ic}–\eqref{eq:bc}, and to fit any available observational data. This approach enables a seamless integration of data and physics, where the corresponding loss components are often treated in a multi-objective (MO) optimization framework~\cite{rohrhofer2023data}.
+
+
+Suppose we are given a set of observation data $\mathcal{D}_{\rm d} = { (\mathbf{x}^{(i)}, t^{(i)}, u^{(i)}) }_{i=1}^{N_d}$ at discrete sensor locations, which represent noisy or exact measurements of the true solution $u$. To enforce physical consistency, we introduce three additional point sets: $\mathcal{D}_r = {(\mathbf{x}^{(j)}_r, t^{(j)}_r)}_{j=1}^{N_r} \subset \Omega \times (0,T]$ for the PDE residual, $\mathcal{D}_i = {(\mathbf{x}^{(l)}_i, 0)}_{l=1}^{N_i} \subset \Omega \times {0}$ for the initial condition, and $\mathcal{D}_b = {(\mathbf{x}^{(k)}_b, t^{(k)}_b)}_{k=1}^{N_b} \subset \partial\Omega \times (0,T]$ for the boundary condition.
+Using these sets, we define the following empirical loss function:
+\begin{equation}
+\mathcal{L}(\theta) 
+= \lambda_d \, \mathcal{L}_{\rm d}(\theta) 
++ \lambda_r \, \mathcal{L}_{\mathrm{pde}}(\theta) 
++ \lambda_i \, \mathcal{L}_{\mathrm{ic}}(\theta) 
++ \lambda_b \, \mathcal{L}_{\mathrm{bc}}(\theta),
+\label{eq:pinn_loss_full}
+\end{equation}
+with non-negative weights $\lambda_d, \lambda_r, \lambda_i, \lambda_b$ balancing the different components. The individual loss terms are defined as:
+\begin{align}
+\mathcal{L}_{\rm d}(\theta) 
+&= \frac{1}{N_d} \sum_{i=1}^{N_d} \left\| u_\theta(\mathbf{x}^{(i)}, t^{(i)}) - u^{(i)} \right\|_2^2, \label{eq:loss_data} \\
+\mathcal{L}_{\mathrm{pde}}(\theta) 
+&= \frac{1}{N_r} \sum_{j=1}^{N_r} \left\| \mathcal{L}[u_\theta](\mathbf{x}^{(j)}_r, t^{(j)}_r) - f(\mathbf{x}^{(j)}_r, t^{(j)}_r) \right\|_2^2, \\
+\mathcal{L}_{\mathrm{ic}}(\theta) 
+&= \frac{1}{N_i} \sum_{l=1}^{N_i} \left\| u_\theta(\mathbf{x}^{(l)}_i, 0) - u_0(\mathbf{x}^{(l)}_i) \right\|_2^2, \\
+\mathcal{L}_{\mathrm{bc}}(\theta) 
+&= \frac{1}{N_b} \sum_{k=1}^{N_b} \left\| \mathcal{B}[u_\theta](\mathbf{x}^{(k)}_b, t^{(k)}_b) - g(\mathbf{x}^{(k)}_b, t^{(k)}_b) \right\|_2^2.
+\end{align}
+
+The optimization objective is to determine the optimal parameters $\theta^\star$ that minimize the total loss, i.e., $\theta^\star = \arg\min_{\theta \in \mathbb{R}^P} \mathcal{L}(\theta)$. The resulting network $u_{\theta^\star}$ serves as a surrogate for the true solution $u$, trained to satisfy both the empirical data and the governing physical laws. An illustration of this learning framework is provided in Figure~\ref{fig:pinn}.
+
+\begin{figure}[htbp]  % h=here, t=top, b=bottom, p=page of floats
+  \centering
+  \includegraphics[width=0.8\linewidth]{PINN (NOT B-PINN) Structure.png}
+  \caption{The uncertainty modeling workflow of physics-informed uncertainty quantification}
+  \label{fig:pinn}
+\end{figure}
+
+\begin{remark}
+Although the physics loss $\mathcal{L}_{\mathrm{pde}}$ enforces equation consistency, it is evaluated only at finitely many collocation points and thus may not uniquely determine the solution—particularly under sparse or high-dimensional sampling. As a result, minimizing $\mathcal{L}_{\mathrm{pde}}$ alone can yield non-physical or spurious solutions. The data loss $\mathcal{L}_d$ is therefore crucial for anchoring the surrogate to observed values and improving generalization. In this work, we adopt a hybrid training strategy that combines both physical and data losses to ensure solution fidelity and robustness.
+\end{remark}
+
+
+\subsection{Analysis and Error Control}
+\label{sec:sub:analysis}
+
+Motivated by the universal approximation theorem for neural networks~\cite{augustine2024survey}, the PINN framework can be interpreted as a mesh-free, residual-minimization-based solver~\cite{raissi_physics-informed_2019, karniadakis2021physics}. In this formulation, the solution $u$ is approximated by a parametric surrogate $u_\theta \in \mathcal{H}_\Theta$, where $\mathcal{H}_\Theta$ denotes a hypothesis space of continuous functions realized by a neural network with parameters $\theta \in \mathbb{R}^P$. 
+% The network is trained to approximately satisfy the governing PDE as well as the associated initial and boundary conditions by minimizing a composite loss functional, thereby enforcing both data fidelity and physical consistency in a weak sense.
+
+Let $\mathcal{R}(u_\theta)(\mathbf{x},t) := \mathcal{D}[u_\theta](\mathbf{x},t) - f(\mathbf{x},t)$ denote the pointwise residual of the PDE. For sufficiently regular solutions, the residual $\mathcal{R}(u_\theta)$ is defined over $L^2(0,T; L^2(\Omega))$ and serves as a practical indicator~\cite{mao2023physics}. A natural {\it a posteriori} surrogate for the global error is given by the squared residual norm:
+\[
+\| \mathcal{R}(u_\theta) \|_{L^2(\Omega \times (0,T))}^2 
+\approx \frac{1}{N_r} \sum_{(\mathbf{x},t) \in \mathcal{D}_r} \left\| \mathcal{R}(u_\theta)(\mathbf{x},t) \right\|^2.
+\]
+However, while this quantity reflects local physical inconsistency, it does not quantify the predictive confidence of the surrogate in unseen regions, nor does it provide statistically meaningful bounds on the true solution error $\|u_\theta - u\|$.
+
+In traditional numerical analysis~\cite{brenner2008mathematical}, \textit{a priori} error estimates of the form
+\[
+\|u_\theta - u\|_{H^1(\Omega)} \leq C(\#\theta, \|u\|_{H^2(\Omega)})
+\]
+can be established under suitable regularity assumptions~\cite{brenner2008mathematical, bramble1970estimation}, where $h$ denotes the mesh size and $C$ is a constant depending on the approximation properties of the finite element space. 
+
+In the context of PINNs, however, the hypothesis space $\mathcal{H}_\Theta$ is nonlinear, high-dimensional, and parameterized by a neural network architecture. These features render both \textit{a priori} and \textit{a posteriori} analysis difficult to formalize rigorously. In particular, existing residual-based indicators lack provable guarantees on the generalization or extrapolation error of the learned solution. For recent progress on theoretical error estimates for PINN-type methods, we refer the reader to~\cite{mishra2023estimates, mishra2022estimates}.
+
+
+This motivates the need for uncertainty quantification (UQ) frameworks that can provide finite-sample, statistically valid estimates of predictive uncertainty. In particular, we seek to characterize the \emph{epistemic uncertainty} of $u_\theta$ as a learned surrogate in regions that are weakly constrained by the data or the governing physics. In the remainder of this paper, we develop a conformal prediction-based approach that enables rigorous, distribution-free UQ with guaranteed coverage probabilities.
+
+
+% -----------------------------------------------------------
+% Heuristics & Conformal Prediction
+% -----------------------------------------------------------
+\section{Conformal Prediction for Uncertainty Quantification}
+\label{sec:cp}
+
+\subsection{Heuristic Uncertainty Quantification}
+\label{sec:sub:original_uq}
+
+To establish a set of uncalibrated baselines for comparison with our conformal prediction (CP) approach, we implement four heuristic uncertainty estimation strategies within the physics-informed learning framework. These methods aim to approximate the epistemic uncertainty associated with the surrogate solution $u_\theta(\mathbf{x},t)$ without requiring formal statistical calibration. The four baselines are as follows:
+
+\begin{enumerate}[label=(\roman*)]
+\item Latent or feature-space distance: A non-Bayesian heuristic that estimates uncertainty based on the distance between a test point and the training data manifold in latent space~\cite{hu_robust_2022}.
+
+\item Monte Carlo dropout~\cite{gal_dropout_2016}: A Bayesian approximation technique that introduces stochasticity via random dropout during inference, producing an ensemble of outputs that reflect predictive variance.
+
+\item Bayesian posterior sampling: This category includes methods such as variational inference (VI)~\cite{blei2017variational} and Hamiltonian Monte Carlo (HMC)~\cite{yang_b-pinns_2021}, which aim to approximate the posterior distribution over network parameters and use it to generate predictive uncertainty estimates. VI provides a tractable but approximate posterior via optimization, while HMC offers more accurate sampling at greater computational cost.
+\end{enumerate}
+
+The first method is a non-Bayesian, data-driven heuristic, while the remaining two fall under the category of approximate Bayesian inference. Despite their differences, all three approaches share a common objective: to estimate the predictive uncertainty of the model via a surrogate function $\hat{\sigma}(x)$, which serves as a proxy for the unknown posterior spread $\sigma(x)$. Formally, this function is defined as
+\begin{equation}
+\hat{\sigma}:\mathbb{R}^{d} \longrightarrow \mathbb{R}_{\ge 0}, \qquad
+  x \mapsto \hat{\sigma}(x),
+\label{eq:raw_hu_func}
+\end{equation}
+where $\hat{\sigma}(x)$ denotes a raw uncertainty estimate associated with input $x$, computed via model-specific heuristics and prior to any statistical calibration.
+
+These heuristics provide empirical uncertainty bands that often lack formal coverage guarantees~\cite{mousavi2017heuristics}. In our framework, they serve as inputs to the conformal prediction procedure, which transforms the raw scores $\hat{\sigma}(x)$ into calibrated prediction intervals. Details of each baseline construction are given below.
+
+\subsubsection{Distance-Based Uncertainty Estimation}
+\label{sec:sub:distance}
+
+\paragraph{Feature Space Distance}
+
+The geometric distance is a simple and widely used method for estimating epistemic uncertainty based on geometric proximity in the input space. Given a training dataset $\mathcal D_{\mathrm{tr}} = \{x^{(i)}\}_{i=1}^{N} \subset \Omega \subset \mathbb{R}^{d}$, where $\Omega$ denotes the input domain and $d$ is the input dimension, we define the uncertainty at a test point $x \in \Omega$ using its distance to nearby training samples.
+
+Specifically, let $\mathcal{N}_k(x) = \{x_j^\ast\}_{j=1}^k \subset \mathcal D_{\mathrm{tr}}$ denote the set of $k$ nearest neighbors of $x$ with respect to the $\ell_2$ norm.\footnote{Other distance metrics, such as Mahalanobis or cosine distance, can also be used depending on the geometry of the input space.} The FD uncertainty estimate is then defined as the average Euclidean distance between $x$ and its $k$-nearest neighbors:
+
+\begin{equation}
+\hat\sigma_{\textsc{FD}}(x)
+= \frac{1}{k} \sum_{x_j^\ast \in \mathcal N_k(x)} \lVert x - x_j^\ast \rVert_2
+\label{eq:fd_hu}
+\end{equation}
+where the nearest neighbors are constructed recursively as
+\begin{equation}
+x_j^\ast = \arg\min_{x' \in \mathcal D_{\mathrm{tr}} \setminus {x_1^\ast, \dots, x_{j-1}^\ast}} \lVert x - x' \rVert_2.
+\end{equation}
+
+This measure captures the local sampling density of the training data around $x$: $\hat\sigma_{\textsc{FD}}(x)$ tends to be small in regions with dense training coverage, and large in extrapolative regions far from any training samples. Hence, it serves as a simple proxy for epistemic uncertainty due to data sparsity.
+
+\paragraph{Latent Space Distance} To enhance the geometric expressiveness of distance-based uncertainty estimates, we consider the distance in the latent feature space of the trained network. Let $h_{\theta} \colon \Omega \to \mathbb{R}^{m}$ denote the nonlinear mapping realized by the final hidden layer (also called the penultimate layer) of the neural network parameterized by $\theta$. This embedding is often regarded as a task-adaptive representation, where Euclidean distance better reflects the semantic or predictive similarity between data points than in the raw input space.
+
+The latent-distance-based uncertainty is then defined as:
+\begin{equation}
+\hat\sigma_{\textsc{LD}}(x)
+= \frac{1}{k} \sum_{x_j^\ast \in \mathcal N_k^{\text{latent}}(x)} \lVert h_{\theta}(x) - h_{\theta}(x_j^\ast) \rVert_2
+\label{eq:ld_hu}
+\end{equation}
+where the set of nearest neighbors $\mathcal N_k^{\text{latent}}(x) = {x_j^\ast}{j=1}^{k}$ is constructed similarly to the input-space case, but with distances evaluated in the latent space:
+\begin{equation}
+x_j^\ast = \operatorname{\arg\min}_{x' \in \mathcal D_{\mathrm{tr}} \setminus {x_1^\ast, \dots, x_{j-1}^\ast}} \lVert h_{\theta}(x) - h_{\theta}(x') \rVert_2.
+\end{equation}
+
+Let $\mathcal{H}_{\mathrm{tr}} := \{h_{\theta}(x^{(i)})\}_{i=1}^{N} \subset \mathbb{R}^{m}$ denote the latent representations of the training inputs. The uncertainty score $\hat\sigma_{\textsc{LD}}(x)$ reflects the local density of $\mathcal{H}_{\mathrm{tr}}$ around the test point $x$ and benefits from the expressiveness of the learned feature space. However, in high-dimensional latent spaces, Euclidean distances become less informative due to the “curse of dimensionality”~\cite{beyer1999nearest}, and alternative metrics or dimensionality reduction techniques (e.g., PCA~\cite{abdi2010principal}, t-SNE~\cite{maaten2008visualizing}) may be required to restore discriminative power.
+
+
+\subsubsection{Monte Carlo Dropout}
+\label{sec:sub:mc_do}
+
+Monte Carlo (MC) dropout is a practical and scalable approach to approximate Bayesian inference in deep neural networks~\cite{gal_dropout_2016}. It interprets the application of dropout layers as introducing stochasticity in the model weights, whereby each forward pass with a randomly sampled dropout mask corresponds to a realization from a variational posterior distribution. By retaining dropout at inference time, one can generate approximate posterior samples and quantify epistemic uncertainty via Monte Carlo statistics.
+
+Let $\{m_{\mathrm{do}}^{(n)}\}_{n=1}^{N_{\mathrm{MC}}}$ denote a collection of $N_{\mathrm{MC}}$ independent dropout masks sampled during inference. For a fixed test input $x \in \Omega \times [0,T]$, each stochastic forward pass yields a realization
+\[
+u_\theta^{(n)}(x) := f_{\theta, m_{\mathrm{do}}^{(n)}}(x),
+\]
+where $f_{\theta, m}$ denotes the network output with parameters $\theta$ and dropout mask $m$. The empirical mean and predictive variance are then estimated by:
+\begin{equation}
+\hat{\mu}_{\mathrm{do}}(x) = \frac{1}{N_{\mathrm{MC}}} \sum_{n=1}^{N_{\mathrm{MC}}} u_\theta^{(n)}(x), 
+\qquad
+\hat{\sigma}_{\mathrm{do}}^2(x) = \frac{1}{N_{\mathrm{MC}} - 1} \sum_{n=1}^{N_{\mathrm{MC}}} \left\| u_\theta^{(n)}(x) - \hat{\mu}_{\mathrm{do}}(x) \right\|_2^2.
+\label{eq:do_mean_var}
+\end{equation}
+
+Here, $\hat{\sigma}_{\mathrm{do}}(x)$ serves as a pointwise estimate of epistemic uncertainty associated with the prediction at $x$. This method offers a computationally efficient alternative to full Bayesian inference, while still capturing model uncertainty induced by limited training data or structural mismatch.
+
+\subsubsection{Bayesian Posterior Sampling}
+\label{sec:sub:bayesian_posterior_sampling}
+
+Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^{N}$ denote the training dataset, and let $\theta \triangleq \{\mathbf{W}, \mathbf{b}\}$ represent the collection of all neural network weights and biases. In the Bayesian framework, uncertainty in the model parameters is characterized by placing a prior distribution $p_0(\theta)$ over $\theta$ and computing the posterior via Bayes’ theorem:
+\begin{equation}
+p(\theta \mid \mathcal{D}) = \frac{p(\mathcal{D} \mid \theta)\, p_0(\theta)}{\int p(\mathcal{D} \mid \theta)\, p_0(\theta)\, \mathrm{d}\theta},
+\label{eq:posterior_exact}
+\end{equation}
+where $p(\mathcal{D} \mid \theta)$ is the likelihood, and the denominator represents the marginal likelihood (or evidence).
+
+For deep neural networks, the integral in~\eqref{eq:posterior_exact} is intractable, making exact inference computationally impossible. Therefore, approximate inference techniques are employed. Two popular approaches are Variational Inference (VI) and Hamiltonian Monte Carlo (HMC), introduced below.
+
+
+\paragraph{Variational Inference}
+\label{par:bayesian_posterior_sampling}
+
+Variational inference (VI) approximating the posterior with a tractable, parametric family of distributions through a minimization task\footnote{For the VI implementation, we follows Yang's implementation of VI B-PINNs~\cite{yang_b-pinns_2021}}. Assuming the true posterior can be approximated by a fully factorizable Gaussian, 
+\begin{equation}
+  q_{\phi}(\theta)
+  \;=\;
+  \prod_{j=1}^{d_\theta}
+  \mathcal N\!\bigl(\theta_j \mid \mu_j,\;\sigma_j^{2}\bigr),
+  \qquad
+  \sigma_j \;=\; \operatorname{softplus}(\rho_j),
+  \label{eq:mf_gaussian}
+\end{equation}
+where $\phi=\{(\mu_j,\rho_j)\}_{j=1}^{d_\theta}$ are the variational
+parameters and the soft‐plus ensures every standard deviation is strictly
+positive under the re-parameterized optimization~\cite{blundell_weight_2015}. 
+Then we optimize the surrogate with the following loss function\footnote{The optimization problem can be equivalently written as minimizing the KL Divergence from surrogates to the intractable posterior}\footnote{In practice, we replace the full loss function~\eqref{eq:elbo} with the mini-batch loss~\eqref{eq:minibatch_elbo} to accelerate the training process. See~\ref{sec:apd:minibat} for implementation details}.
+\begin{align}
+  \min_{\phi}\ - \mathcal L_{\mathrm{ELBO}}(\phi) 
+  &= -
+     \underbrace{\mathbb E_{q_{\phi}}
+       \!\bigl[\log p(\mathcal D\mid\theta)\bigr]}_{\text{expected log–likelihood}}
+     \;+\;
+     \underbrace{\mathrm{KL}\!\bigl(q_{\phi}(\theta)\,||\,p_{0}(\theta)\bigr)}_{\text{complexity penalty}}
+  \label{eq:elbo}
+\end{align}
+
+At predicting time, given a query point $x$, we compute the predictive mean and variance through Monte-Carlo method, where each $\{\hat f_{\theta^{(m)}}(x)\}_{m=1}^{M}$ is obtained through load the parameters samples drawn from $q_{\phi}$. 
+\begin{equation}
+    \begin{aligned}
+    &\hat\mu_{\textsc{vi}}(x)=\tfrac1M\sum_{m=1}^{M}\hat f_{\theta^{(m)}}(x),
+    \quad
+    \hat\sigma_{\textsc{vi}}(x)=
+    \tfrac1{M}\sum_{m=1}^{M}
+    \lVert \hat f_{\theta^{(m)}}(x)-\hat\mu(x)\rVert_2 \\
+    &\text{where} \quad
+    \theta^{(m)} = (W^{(m)}, b^{(m)}) \sim q_{\phi}(\theta) 
+    \label{eq:vimc_mv}
+    \end{aligned}
+\end{equation}
+\noindent
+
+\paragraph{Hamiltonian Monte Carlo (HMC)}
+\label{sec:sub:hmc}
+Hamiltonian Monte Carlo (HMC) approximate the true posterior distribution by directly sampling $\theta$ from a surrogate system (Hamiltonian system) with the Metropolis-Hasting Algorithm~\cite{neal_mcmc_2012, betancourt_conceptual_2018}. It first construct a Hamiltonian system:
+\begin{equation}
+\label{eq:hamiltonian_full}
+H(\theta,r)=U(\theta)+V(r),
+\text{ where}
+\quad
+\begin{aligned}
+    U(\theta)
+  &\triangleq -\log p(\mathcal D\mid\theta) - \log p_0(\theta) + \text{const} \\
+  V(r)
+  &= \tfrac{1}{2}\, r^{\mathsf T} M^{-1} r
+\end{aligned}
+\end{equation}
+
+
+\noindent
+where the potential energy $U(\theta)$ encode the parameters' posterior formulation~\eqref{eq:posterior_exact} in the potential energy function and $V(r)$ is the fictional kinetic component, in which \( r \in \mathbb{R}^{d_\theta} \) is the momentum variable, and \( M \in \mathbb{R}^{d_\theta \times d_\theta} \) is the mass matrix.
+
+Let $\theta^{(k-1)}$ denotes the theta sampled from the previous iteration. We sample $\theta^{(k)}$ by randomly sample an auxiliary momentum variable $r_0$ from the momentum prior $\mathcal N(0, M)$. The Hamiltonian dynamics are
+\begin{subequations}
+\label{eq:hmc_ode}
+\begin{align}
+  \frac{d\theta}{dt} = M^{-1} r, 
+  \quad
+  \frac{dr}{dt}      = -\nabla_{\!\theta} U(\theta)
+\end{align}
+\end{subequations}
+
+Exact integration of~\eqref{eq:hmc_ode} would conserve $H$ and produce
+proposal moves that lie on the energy level sets of the Hamiltonian, which will be the new sample after we discard $r'$. 
+
+\begin{equation}
+    (\theta^{(k-1)}, r_0) \rightarrow (\theta^{(k)}, r') \rightarrow \theta^{(k)}
+\end{equation}
+
+\noindent
+In practice, we use discretion methods, like leapfrog, to numerically approximate the trajectory integral and the discretizations error that is subsequently corrected by a Metropolis–Hastings accept–reject step. 
+
+At predicting step, with drawn samples $H = \{\theta^{(m)}\}_{m=1}^M$. We discard the first $b$ samples as the burn-in samples. Then, the predictive mean and variance at $x$ are estimated by Monte-Carlo method:
+\begin{equation}
+    \begin{aligned}
+        &\hat\mu_{\textsc{hmc}}(x)
+        =
+        \frac{1}{N_{MC}'}\sum_{m=b+1}^{N_{MC}'} f_{\theta^{(m)}}(x),
+        \quad
+        \hat\sigma_{\textsc{hmc}}(x)
+        =
+        \frac{1}{N_{MC}'-1}\sum_{m=b+1}^{N_{MC}'}
+        \bigl\| f_{\theta^{(m)}}(x) - \hat\mu_{\textsc{hmc}}(x) \bigr\|_{2} \\
+        &\text{where} \quad
+        N_{MC}' = M_{MC} - b
+    \end{aligned}
+\label{eq:hmc_pred_mean_var} 
+\end{equation}
+
+
+%────────────────────────────────────────────────────────────
+\subsection{Conformal Prediction}
+\label{sec:sub:cp}
+%────────────────────────────────────────────────────────────
+\subsubsection{Vanilla Conformal Prediction}
+\label{sec:sub:sub:vanilla_cp}
+Given a raw heuristic uncertainty estimate $\hat \sigma_{\text{baseline}}$ and a labeled dataset $\mathcal{D} = {(x_i, y_i)}_{i=1}^{N}$, conformal prediction can be employed to calibrate the uncertainty estimates, thereby providing prediction intervals with statistically guaranteed coverage.
+
+To begin the calibration process, we randomly partition the dataset $\mathcal{D}$ into three mutually disjoint subsets:
+
+\begin{equation}
+  \mathcal D \;=\;
+  \mathcal D_{\mathrm{train}} \cup
+  \mathcal D_{\mathrm{cal}} \cup
+  \mathcal D_{\mathrm{test}},
+  \qquad
+  |\mathcal D_{\mathrm{train}}|:|\mathcal D_{\mathrm{cal}}|:|\mathcal D_{\mathrm{test}}|
+  \;=\; 60:15:25 ,
+  \label{eq:data_split_vanilla}
+\end{equation}
+%
+where the $60 : 15 : 25$ split is a common but not mandatory choice. The training subset is used to fit a deterministic predictor $\hat y_{\theta}\!:\mathcal X\!\to\!\mathbb R$, e.g.\ a PINN. For each exchangeable calibration pair $(x_i,y_i)\in\mathcal D_{\mathrm{cal}}$ we compute the (non-)conformity score as the $\mathrm{L}1$ residue $r_i$ and collect the set of non-conformity score $R$ across the calibration set~\eqref{eq:score_vanilla}.
+%
+\begin{equation}
+  r_i = \bigl|\,y_i - \hat y_{\theta}(x_i)\bigr|
+  \xrightarrow{\,(x_i,y_i)\in\mathcal D_{\mathrm{cal}}\,}
+  R = \{r_i\}_{i=1}^{|\mathcal D_{\mathrm{cal}}|}
+  \label{eq:score_vanilla}
+\end{equation}
+%
+
+Let $q_{1-\alpha}$ be the
+$\lceil (1-\alpha)\bigl(|\mathcal D_{\mathrm{cal}}|+1\bigr)\rceil$-th smallest element of $R$.  
+For a new input $x^\ast$, the vanilla $(1-\alpha)$ conformal
+prediction interval is
+%
+\begin{equation}
+  I_{1-\alpha}(x^\ast)
+  \;=\;
+  \bigl[
+      \hat y_{\theta}(x^\ast) - q_{1-\alpha},\;
+      \hat y_{\theta}(x^\ast) + q_{1-\alpha}
+  \bigr],
+  \label{eq:vanilla_cp_interval}
+\end{equation}
+%
+and satisfies the finite-sample coverage guarantee
+$\Pr\!\bigl\{\,y^\ast\in I_{1-\alpha}(x^\ast)\bigr\}\ge 1-\alpha$ by construction~\cite{angelopoulos_gentle_2022}.
+
+\bigskip
+\subsubsection{Scaled Conformal Prediction}
+\label{sec:sub:scaled_cp}
+
+Vanilla conformal prediction treats every calibration residual equally—an implicit assumption of homoscedastic noise.
+When the underlying model already offers a local uncertainty estimate (as in Bayesian PINNs, MC‐Dropout, VI, or ensembling), the absolute–residual score in~\eqref{eq:score_vanilla} (i) disregards this extra information and (ii) yields overly conservative bands in high‐noise regions while under-covering low‐noise ones, creating a globally well-calibrated while locally poor-calibrated error band.
+
+The Scaled conformal prediction (SCP), on the other hand, corrects both issues by normalizing the residual with a local spread proxy $\hat\sigma:\mathcal X\!\to\!\mathbb R_{>0}$ supplied by the baseline UQ method (see \S\ref{sec:sub:original_uq}). With the same data split~\eqref{eq:data_split_vanilla}, the scaled non-conformity score for each calibration pair $(x_i,y_i)\in\mathcal D_{\mathrm{cal}}$ is calculated as~\eqref{eq:score_scaled}, setting $\hat\sigma(x)\equiv 1$ will recovers the vanilla score function~\eqref{eq:score_vanilla}. 
+\begin{equation}
+  s_i \;=\;
+    \frac{\bigl|\,y_i - \hat y_{\theta}(x_i)\bigr|}
+        {\hat\sigma(x_i)}
+    \xrightarrow{\,(x_i,y_i)\in\mathcal D_{\mathrm{cal}}\,}
+    R = \{s_i\}_{i=1}^{|\mathcal D_{\mathrm{cal}}|}
+\label{eq:score_scaled}
+\end{equation}
+Let $q^{\mathrm{sca}}_{1-\alpha}$ be the $\bigl\lceil (1-\alpha)\bigl(|\mathcal D_{\mathrm{cal}}|+1\bigr)\bigr\rceil$-th smallest element of $S$. For a new input $x^\ast$ the $(1-\alpha)$, SCP interval becomes~\eqref{eq:scaled_cp_interval}, 
+\begin{equation}
+\begin{aligned}
+    I^{\mathrm{sca}}_{1-\alpha}(x^\ast)
+    &=
+    \bigl[
+        \hat y_{\theta}(x^\ast) - q_{1-\alpha},\;
+        \hat y_{\theta}(x^\ast) + q_{1-\alpha}
+    \bigr]\\
+    &=
+    \bigl[
+        \hat y_{\theta}(x^\ast) \;-\; q^{\mathrm{sca}}_{1-\alpha}\,\hat\sigma(x^\ast),\;
+        \hat y_{\theta}(x^\ast) \;+\; q^{\mathrm{sca}}_{1-\alpha}\,\hat\sigma(x^\ast)
+    \bigr]
+\label{eq:scaled_cp_interval}
+\end{aligned}
+\end{equation}
+which maintains the exact, distribution-free coverage guarantee $\Pr\!\bigl\{\,y^\ast\in I^{\mathrm{sca}}_{1-\alpha}(x^\ast)\bigr\}\ge 1-\alpha$ while automatically adjusting the band width to local heteroskedasticity from the heuristics uncertainty estimates.
+
+\cys{say analysis}
+
+\cys{Maybe we should put the metrics here}
+
+\subsection{Evaluation Metrics}
+\label{sec:metrics}
+
+To evaluate the model's performance, we 
+
+
+\section{Numerical Experiments}
+\label{sec:numerics}
+
+\subsection{1D Poisson Equation}
+\label{sec:1d}
+\subsection{2D Burgers Equation}
+\label{sec:2d}
+\subsection{3D Allen–Cahn Equation}
+\label{sec:3d}
+
+\section{Extensions}
+\label{sec:extension}
+
+\subsection{Local Conformal Prediction}
+\label{sec:extension:localcp}
+
+\subsection{Alternative Nonconformity Scores}
+\label{sec:extension:nonconf}
+
+\subsection{Adaptive Sampling and Active Learning}
+\label{sec:extension:active}
+
+\section{Conclusion and Outlook}
+\label{sec:conclusion}
+
+% 
+This work focuses on forward PDE problems with fully known boundary and initial conditions; extending the framework to inverse problems or partially observed systems is a natural next step. Future work may also explore adaptive nonconformity scores, time-dependent PDEs, and integration with operator learning frameworks such as DeepONets or Fourier Neural Operators, enabling uncertainty-aware predictions in high-dimensional and parametric PDE settings.
+
+\appendix
+
+\section{Mini-batch Loss for Variational Inference}
+\label{sec:apd:minibat}
+
+\begin{align}
+  &\min_{\phi}\ - \mathcal L_{\mathrm{ELBO}}(\phi) 
+  = -
+     \underbrace{\mathbb E_{q_{\phi}}
+       \!\bigl[\log p(\mathcal B\mid\theta)\bigr]}_{\text{expected log–likelihood}}
+     \;+\;
+     \underbrace{\mathrm{KL}\!\bigl(q_{\phi}(\theta)\,||\,p_{0}(\theta)\bigr)}_{\text{complexity penalty}}
+    &\text{where }
+    \mathcal B \subset \mathcal D
+    \text{ is the batch set}
+  \label{eq:minibatch_elbo}
+\end{align}
+
+\section{Extra UQ}
+\label{sec:apd:uq}
+
+\section{Additional Numerical Results}
+\label{sec:apd:numerics}
+
+%% If you have bibdatabase file and want bibtex to generate the
+%% bibitems, please use
+%%
+\bibliographystyle{elsarticle-num} 
+\bibliography{ft.bib}
+
+%% else use the following coding to input the bibitems directly in the
+%% TeX file.
+
+%\begin{thebibliography}{00}
+
+%% \bibitem{label}
+%% Text of bibliographic item
+
+%\bibitem{}
+
+%\end{thebibliography}
+\end{document}
+\endinput
+%%
+%% End of file `elsarticle-template-num.tex'.

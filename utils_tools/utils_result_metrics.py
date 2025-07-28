@@ -92,31 +92,6 @@ def _sharpness(pred_set):
     return (upper - lower).mean().item()
 
 
-def _sdcv(pred_set):
-    """ Spatial Dispersion Coefficient of Variation (SDCV) of predicted uncertainty.
-    Computes the coefficient of variation (standard deviation / mean) of the predicted interval widths across all samples, which indicates the dispersion of uncertainty estimates.
-    
-    Parameters
-    ----------
-    pred_set : array-like, shape (2, N) or (N, 2)
-        Predicted interval for each sample (lower and upper bounds).
-    
-    Returns
-    -------
-    float 
-        The coefficient of variation of interval widths (unitless).
-    """
-    lower = pred_set[0]
-    upper = pred_set[1]
-    width = (upper - lower)
-    mean_width = width.mean()
-    if mean_width.item() == 0:
-        return 0.0
-    std_width = width.std(unbiased=False)  # population standard deviation
-    cv = std_width / mean_width
-    return cv.item()
-
-
 def _interval_score(pred_set, y_true, alpha):
     """ Interval Score (IS) for the prediction intervals.
     A proper scoring rule for interval forecasts that combines interval width and penalties for excluding the true value.
@@ -142,7 +117,7 @@ def _interval_score(pred_set, y_true, alpha):
     below_miss = (lower - y_true).clamp(min=0.0)   # (l - y)_+ term
     above_miss = (y_true - upper).clamp(min=0.0)   # (y - u)_+ term
     score = width + (2.0 / alpha) * (below_miss + above_miss)
-    return score.mean().item()
+    return score.sum().item()
 
 
 
@@ -167,17 +142,15 @@ def vi_test_uncertainties(uqmodel, alphas, X_test, Y_test):
             alpha_val = float(alpha.item())
             if not (0.0 < alpha_val < 1.0):
                 raise ValueError("alpha must be in (0,1) for VI.")
-            pred_set = uqmodel.predict(alpha, X_test, n_samples=100)
+            pred_set = uqmodel.predict(alpha, X_test, n_samples=5000)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
-            sdcv = _sdcv(pred_set)
             interval_score = _interval_score(pred_set, Y_test, alpha)
 
             results.append({
                 "alpha": alpha_val,
                 "coverage": coverage,
                 "sharpness": sha,
-                "sdcv": sdcv,
                 "interval score": interval_score
             })
         return pd.DataFrame(results)
@@ -200,14 +173,12 @@ def cp_test_uncertainties(uqmodel, alphas, X_test, Y_test, X_cal, Y_cal, X_train
         pred_set = uqmodel.predict(alpha, X_test,  X_train,  Y_train, X_cal, Y_cal, heuristic_u=heuristic_u, k=k)
         coverage = _coverage(pred_set, Y_test)
         sha = _sharpness(pred_set)
-        sdcv = _sdcv(pred_set)
         interval_score = _interval_score(pred_set, Y_test, alpha)
 
         results.append({
             "alpha": alpha_val,
             "coverage": coverage,
             "sharpness": sha,
-            "sdcv": sdcv,
             "interval score": interval_score
         })
     return pd.DataFrame(results)
@@ -229,14 +200,12 @@ def do_test_uncertainties(uqmodel, alphas, X_test, Y_test, n_samples):
             pred_set = uqmodel.predict(alpha, X_test, n_samples,)
             coverage = _coverage(pred_set, Y_test)
             sha = _sharpness(pred_set)
-            sdcv = _sdcv(pred_set)
             interval_score = _interval_score(pred_set, Y_test, alpha)
 
             results.append({
                 "alpha": alpha_val,
                 "coverage": coverage,
                 "sharpness": sha,
-                "sdcv": sdcv,
                 "interval score": interval_score
             })
         return pd.DataFrame(results)
@@ -255,7 +224,7 @@ def hmc_test_uncertainties(uqmodel,
                            alphas,
                            X_test,
                            Y_test,
-                           n_samples: int = 1000):
+                           n_samples: int = 5000):
     """
     Evaluate uncertainty metrics (coverage and sharpness) for an HMC-based
     Bayesian PINN across a grid of α values.
@@ -283,14 +252,12 @@ def hmc_test_uncertainties(uqmodel,
         pred_set = uqmodel.predict(alpha_val, X_test, n_samples=n_samples)
         coverage = _coverage(pred_set, Y_test)
         sha      = _sharpness(pred_set)
-        sdcv = _sdcv(pred_set)
         interval_score = _interval_score(pred_set, Y_test, alpha)
 
         results.append({
             "alpha": alpha_val,
             "coverage": coverage,
             "sharpness": sha,
-            "sdcv": sdcv,
             "interval score": interval_score
         })
     return pd.DataFrame(results)
@@ -330,15 +297,12 @@ def dist_test_uncertainties(uqmodel,
                                    heuristic_u=heuristic_u, n_samples=n_samples)
         coverage = _coverage(pred_set, Y_test)
         sha      = _sharpness(pred_set)
-
-        sdcv = _sdcv(pred_set)
         interval_score = _interval_score(pred_set, Y_test, alpha)
 
         results.append({
             "alpha": alpha_val,
             "coverage": coverage,
             "sharpness": sha,
-            "sdcv": sdcv,
             "interval score": interval_score
         })
     return pd.DataFrame(results)
