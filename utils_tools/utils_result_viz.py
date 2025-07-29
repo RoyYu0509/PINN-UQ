@@ -11,7 +11,7 @@ def plot_truth_and_samples_1D(
     x_colloc,
     n_grid: int = 500,
     title: str = "True solution vs. training data",
-    show: bool = True,
+    show: bool = False,
 ):
     """
     Parameters
@@ -52,13 +52,6 @@ def plot_truth_and_samples_1D(
     ax.grid(True, linestyle="--", linewidth=0.3)
     plt.tight_layout()
 
-    if show:
-        plt.show()
-
-    # return fig, ax  # handy when show=False
-    return
-
-
 
 """
 fig, ax = plot_truth_and_samples(
@@ -98,7 +91,7 @@ def plot_predictions_1D(x_grid, pred_set, true_solution, main_title="PDE UQ",
                     c='red', s=20, label="Training data", alpha=0.6)
     plt.fill_between(x_grid_np, lower_np, upper_np, color='blue', alpha=0.3, label="Confidence interval")
 
-    plt.title(title)
+    plt.title(main_title)
     plt.xlabel("x")
     plt.ylabel("u(x)")
     plt.legend()
@@ -205,6 +198,7 @@ def plot_dual_expected_vs_empirical(
     title1='Uncalibrated Model',
     title2='Calibrated Model',
     dev_metric='mae',
+    main_title=None,
     **unused
 ):
     """
@@ -258,7 +252,8 @@ def plot_dual_expected_vs_empirical(
     axes[1].set_ylabel("Empirical Coverage")
     axes[1].grid(True)
     axes[1].legend()
-
+    if main_title is not None:
+        plt.title(main_title, pad=20, fontsize=12)
     plt.tight_layout()
 
 
@@ -296,6 +291,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import pandas as pd
+from scipy.ndimage import zoom
+
 
 def plot_2D_comparison_with_coverage(
     XY_test,
@@ -304,8 +301,8 @@ def plot_2D_comparison_with_coverage(
     true_solution,
     df_uncal,
     df_cal,
-    X_pts=None,  # OLD param - kept for backward compatibility
-    X_vis=None, Y_vis=None,  # NEW param - preferred for clarity
+    X_pts=None,
+    X_vis=None, Y_vis=None,
     title="2D UQ Result",
     vlim_true=None,
     vlim_pred_mean=None,
@@ -314,13 +311,14 @@ def plot_2D_comparison_with_coverage(
     alpha_col='alpha',
     cov_col='coverage',
     metric: str = "mae",
-    main_title=None
+    main_title=None,
+    grid_size=500
 ):
-    """
-    Visualize 2D predictive intervals, true solution, and coverage diagnostics.
-    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
+    import pandas as pd
 
-    # ─── Prepare visualization points ─────────────────────────────────
     if show_pts:
         if X_vis is not None and Y_vis is not None:
             if isinstance(X_vis, torch.Tensor):
@@ -328,7 +326,7 @@ def plot_2D_comparison_with_coverage(
             if isinstance(Y_vis, torch.Tensor):
                 Y_vis = Y_vis.detach().cpu().numpy()
             x_pts, y_pts = X_vis.flatten(), Y_vis.flatten()
-        elif X_pts is not None:  # fallback for old argument
+        elif X_pts is not None:
             if isinstance(X_pts, torch.Tensor):
                 X_pts = X_pts.detach().cpu().numpy()
             x_pts, y_pts = X_pts[:, 0], X_pts[:, 1]
@@ -339,27 +337,26 @@ def plot_2D_comparison_with_coverage(
 
     def add_scatter(ax):
         if x_pts is not None and y_pts is not None:
-            ax.scatter(x_pts, y_pts, color='black', s=10, alpha=0.8,
-                       label='Sample Points')
+            ax.scatter(x_pts, y_pts, color='black', s=10, alpha=0.8, label='Sample Points')
             ax.legend(loc='upper right')
 
-    # ─── Coverage deviation helpers ────────────────────────────────────
     def prepare_coverage_data(df):
         expected = 1 - df[alpha_col]
         empirical = df[cov_col]
-        exp_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])],
-                             ignore_index=True)
-        emp_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])],
-                             ignore_index=True)
+        exp_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])], ignore_index=True)
+        emp_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])], ignore_index=True)
         sort_idx = exp_full.argsort()
         exp_sorted, emp_sorted = exp_full[sort_idx], emp_full[sort_idx]
         return exp_sorted.to_numpy(), emp_sorted.to_numpy()
 
     def coverage_deviation(exp, emp, how="mae"):
         diff = np.abs(emp - exp)
-        if   how == "mae":  return diff.mean()
-        elif how == "rmse": return np.sqrt((diff**2).mean())
-        elif how == "max":  return diff.max()
+        if how == "mae":
+            return diff.mean()
+        elif how == "rmse":
+            return np.sqrt((diff**2).mean())
+        elif how == "max":
+            return diff.max()
         else:
             raise ValueError("metric must be 'mae', 'rmse', or 'max'")
 
@@ -368,10 +365,8 @@ def plot_2D_comparison_with_coverage(
     dev1 = coverage_deviation(exp1, emp1, metric.lower())
     dev2 = coverage_deviation(exp2, emp2, metric.lower())
 
-    # ─── Prepare mesh grid ─────────────────────────────────────────────
     x = XY_test[:, 0].detach().cpu().numpy()
     y = XY_test[:, 1].detach().cpu().numpy()
-    grid_size = 100
     x_lin = np.linspace(x.min(), x.max(), grid_size)
     y_lin = np.linspace(y.min(), y.max(), grid_size)
     X_grid, Y_grid = np.meshgrid(x_lin, y_lin)
@@ -388,65 +383,63 @@ def plot_2D_comparison_with_coverage(
     mean_uncal, width_uncal = prep_interval(pred_set_uncal)
     mean_cal, width_cal = prep_interval(pred_set_cal)
 
-    # ─── Plotting ──────────────────────────────────────────────────────
+    mean_uncal_grid = mean_uncal.reshape(grid_size, grid_size)
+    width_uncal_grid = width_uncal.reshape(grid_size, grid_size)
+    mean_cal_grid = mean_cal.reshape(grid_size, grid_size)
+    width_cal_grid = width_cal.reshape(grid_size, grid_size)
+
     fig, axs = plt.subplots(2, 4, figsize=(22, 10))
+    def imshow_plot(ax, data, vlim, title, zoom_factor=4):
+        # Smooth upsample: shape (H, W) → (H*zoom, W*zoom)
+        data_hr = zoom(data, zoom=zoom_factor, order=3)  # bicubic interpolation
 
-    # --- row 0 : Uncalibrated -----------------------------------------
-    im = axs[0, 0].contourf(X_grid, Y_grid, true_np_grid, levels=100,
-                            vmin=None if vlim_true is None else vlim_true[0],
-                            vmax=None if vlim_true is None else vlim_true[1])
-    fig.colorbar(im, ax=axs[0, 0]); add_scatter(axs[0, 0])
-    axs[0, 0].set_title(f"{title}: True u(x,y)"); axs[0, 0].set_xlabel("x"); axs[0, 0].set_ylabel("y")
+        im = ax.imshow(
+            data_hr,
+            extent=[x.min(), x.max(), y.min(), y.max()],
+            origin='lower',
+            aspect='auto',
+            interpolation='nearest',  # no need for imshow interp; data already smooth
+            vmin=None if vlim is None else vlim[0],
+            vmax=None if vlim is None else vlim[1],
+            cmap='viridis'
+        )
+        fig.colorbar(im, ax=ax)
+        add_scatter(ax)
+        ax.set_title(title)
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
 
-    im = axs[0, 1].tricontourf(x, y, mean_uncal, levels=100,
-                               vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
-                               vmax=None if vlim_pred_mean is None else vlim_pred_mean[1])
-    fig.colorbar(im, ax=axs[0, 1]); add_scatter(axs[0, 1])
-    axs[0, 1].set_title("Predicted Mean (Uncalibrated)")
-
-    im = axs[0, 2].tricontourf(x, y, width_uncal, levels=100,
-                               vmin=None if vlim_pred_width is None else vlim_pred_width[0],
-                               vmax=None if vlim_pred_width is None else vlim_pred_width[1])
-    fig.colorbar(im, ax=axs[0, 2]); add_scatter(axs[0, 2])
-    axs[0, 2].set_title("Interval Width (Uncalibrated)")
-
+    # Row 0 (Uncalibrated)
+    imshow_plot(axs[0, 0], true_np_grid, vlim_true, f"{title}: True u(x,y)")
+    imshow_plot(axs[0, 1], mean_uncal_grid, vlim_pred_mean, "Predicted Mean (Uncalibrated)")
+    imshow_plot(axs[0, 2], width_uncal_grid, vlim_pred_width, "Interval Width (Uncalibrated)")
     axs[0, 3].plot(exp1, emp1, marker='o', label='Empirical')
     axs[0, 3].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y=x)')
     axs[0, 3].set_title(f"Coverage (Uncalibrated)\n{metric.upper()}={dev1:.3f}")
     axs[0, 3].set_xlabel("Expected Coverage (1 − α)")
     axs[0, 3].set_ylabel("Empirical Coverage")
-    axs[0, 3].legend(); axs[0, 3].grid(True)
+    axs[0, 3].legend()
+    axs[0, 3].grid(True)
 
-    # --- row 1 : Calibrated -------------------------------------------
-    im = axs[1, 0].contourf(X_grid, Y_grid, true_np_grid, levels=100,
-                            vmin=None if vlim_true is None else vlim_true[0],
-                            vmax=None if vlim_true is None else vlim_true[1])
-    fig.colorbar(im, ax=axs[1, 0]); add_scatter(axs[1, 0])
-    axs[1, 0].set_title(f"{title}: True u(x,y)"); axs[1, 0].set_xlabel("x"); axs[1, 0].set_ylabel("y")
-
-    im = axs[1, 1].tricontourf(x, y, mean_cal, levels=100,
-                               vmin=None if vlim_pred_mean is None else vlim_pred_mean[0],
-                               vmax=None if vlim_pred_mean is None else vlim_pred_mean[1])
-    fig.colorbar(im, ax=axs[1, 1]); add_scatter(axs[1, 1])
-    axs[1, 1].set_title("Predicted Mean (Calibrated)")
-
-    im = axs[1, 2].tricontourf(x, y, width_cal, levels=100,
-                               vmin=None if vlim_pred_width is None else vlim_pred_width[0],
-                               vmax=None if vlim_pred_width is None else vlim_pred_width[1])
-    fig.colorbar(im, ax=axs[1, 2]); add_scatter(axs[1, 2])
-    axs[1, 2].set_title("Interval Width (Calibrated)")
-
+    # Row 1 (Calibrated)
+    imshow_plot(axs[1, 0], true_np_grid, vlim_true, f"{title}: True u(x,y)")
+    imshow_plot(axs[1, 1], mean_cal_grid, vlim_pred_mean, "Predicted Mean (Calibrated)")
+    imshow_plot(axs[1, 2], width_cal_grid, vlim_pred_width, "Interval Width (Calibrated)")
     axs[1, 3].plot(exp2, emp2, marker='o', label='Empirical')
     axs[1, 3].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y=x)')
     axs[1, 3].set_title(f"Coverage (Calibrated)\n{metric.upper()}={dev2:.3f}")
     axs[1, 3].set_xlabel("Expected Coverage (1 − α)")
     axs[1, 3].set_ylabel("Empirical Coverage")
-    axs[1, 3].legend(); axs[1, 3].grid(True)
+    axs[1, 3].legend()
+    axs[1, 3].grid(True)
 
     if main_title is not None:
         fig.suptitle(main_title, fontsize=18, y=1.02)
 
     plt.tight_layout()
+
+
+
 
 
 
@@ -753,7 +746,7 @@ def plot_truth_and_samples_2D(
     ax.set_title(title)
     ax.legend()
     plt.tight_layout()
-    plt.show()
+
 
 
 import matplotlib.pyplot as plt
@@ -766,8 +759,8 @@ def plot_metrics_table(
     true_solution,
     df1: pd.DataFrame,
     df2: pd.DataFrame,
-    df1_name: str="Calibrated",
-    df2_name: str="Uncalibrated",
+    df1_name: str="Uncalibrated",
+    df2_name: str="Calibrated",
     title: str = "",
     main_title: str | None = None,
     X_vis=None, Y_vis=None,
@@ -875,6 +868,8 @@ def plot_1d_intervals_comparison(
     uncal_interval,
     cp_intervals,
     true_solution,                       # array OR callable
+    uncal_interval_label="Naive band",
+    cal_interval_label="Conformal band",
     t_train=None,
     y_train=None,
     title="PINN Prediction with Conformal & Naïve Intervals",
@@ -927,10 +922,12 @@ def plot_1d_intervals_comparison(
     plt.plot(X_test, n_pred_mean, col["mean"], label="Predicted mean")
 
     plt.fill_between(
-        X_test, cp_lower, cp_upper, color=col["cp_fill"], alpha=alpha_cp, label="Conformal band"
+        X_test, n_lower, n_upper, color=col["naive_fill"], alpha=alpha_naive, label=uncal_interval_label
     )
+
+
     plt.fill_between(
-        X_test, n_lower, n_upper, color=col["naive_fill"], alpha=alpha_naive, label="Naïve band"
+        X_test, cp_lower, cp_upper, color=col["cp_fill"], alpha=alpha_cp, label=cal_interval_label
     )
 
     if t_train is not None and y_train is not None:
@@ -942,4 +939,3 @@ def plot_1d_intervals_comparison(
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()

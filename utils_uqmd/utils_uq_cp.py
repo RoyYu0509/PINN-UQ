@@ -43,7 +43,8 @@ class CP:
 
     def _latent_distance(self, X_test, X_train, k):
         X_test_np = X_test.clone().detach()
-        mean = self.model(X_test_np.to(self.device))
+        with torch.no_grad():
+            mean = self.model(X_test_np.to(self.device))
         self.model.eval()
         with torch.no_grad():
             H_cal = self.model(X_test.to(self.device),   return_hidden=True)[1]
@@ -61,7 +62,8 @@ class CP:
     def _rawstd(self, alpha, X):
         """Return (upper-lower) from the model’s own `predict` method."""
         self.model.eval()
-        pred_set = self.model.predict(alpha, X)
+        with torch.no_grad():
+            pred_set = self.model.predict(alpha, X)
         y_pred = (pred_set[1] + pred_set[0])/2
         width = (pred_set[1] - pred_set[0]).squeeze(-1)    # (N,)
         return _to_numpy(width), y_pred.cpu().numpy()
@@ -157,12 +159,17 @@ class CP:
             
         # --- build intervals --------------------------------------------------
         eps  = q_hat * test_u[:, None]                   # (N_test, out_dim)
-        if isinstance(mean, torch.Tensor):
-            lower = (mean - torch.tensor(eps, dtype=mean.dtype, device=self.device))
-            upper = (mean + torch.tensor(eps, dtype=mean.dtype, device=self.device))
-        else:
-            lower = torch.tensor(mean - eps, dtype=torch.float32, device=self.device)
-            upper = torch.tensor(mean + eps, dtype=torch.float32, device=self.device)
+        with torch.no_grad():
+            if isinstance(mean, torch.Tensor):
+                lower = (mean - torch.tensor(eps, dtype=mean.dtype, device=self.device))
+                upper = (mean + torch.tensor(eps, dtype=mean.dtype, device=self.device))
+            else:
+                lower = torch.tensor(mean - eps, dtype=torch.float32, device=self.device)
+                upper = torch.tensor(mean + eps, dtype=torch.float32, device=self.device)
 
+        del cal_scores, test_u, mean, q_hat, eps
+        import gc
+        gc.collect()
+        torch.mps.empty_cache()
 
         return (lower, upper)

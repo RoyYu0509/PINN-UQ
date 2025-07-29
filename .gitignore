@@ -4,3 +4,5 @@
 # Byte-code caches
 *.pyc
 __pycache__
+
+*.tex

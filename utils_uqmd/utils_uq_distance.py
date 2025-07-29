@@ -76,7 +76,7 @@ class DistanceUQPINN(BasePINNModel):
         lr:            float          = 3e-3,
         print_every:   int            = 500,
         scheduler_cls                 = StepLR,
-        scheduler_kwargs: dict        = {'step_size': 5000, 'gamma': 0.5},
+        scheduler_kwargs: dict        = {'step_size': 5000, 'gamma': 0.7},
         stop_schedule: int            = 40_000
     ):
         """Standard PINN training (MSE + PDE/BC/IC losses)."""

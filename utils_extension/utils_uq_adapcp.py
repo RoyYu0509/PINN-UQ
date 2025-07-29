@@ -204,7 +204,7 @@ class AdaptiveCP:
 
 import pandas as pd
 from tqdm import tqdm
-from utils_tools.utils_result_metrics import _coverage, _sharpness, _sdcv, _interval_score
+from utils_tools.utils_result_metrics import _coverage, _sharpness, _interval_score
 
 def adaptive_cp_test_uncertainties_grid(
     base_md,            # a *trained* torch.nn.Module
@@ -255,18 +255,16 @@ def adaptive_cp_test_uncertainties_grid(
             heuristic_u=heuristic_u, k=k
         )
 
-        # ── 3. diagnostics ────────────────────────────────────────────────
-        cov   = _coverage(pred_set, Y_test)
-        sharp = _sharpness(pred_set)
-        sdcv  = _sdcv(pred_set)
-        iscore= _interval_score(pred_set, Y_test, alpha_val)
+        # 3. store the metrics results
+        coverage = _coverage(pred_set, Y_test)
+        sha      = _sharpness(pred_set)
+        interval_score = _interval_score(pred_set, Y_test, alpha)
 
         results.append({
-            "alpha"         : alpha_val,
-            "coverage"      : cov,
-            "sharpness"     : sharp,
-            "sdcv"          : sdcv,
-            "interval score": iscore,
+            "alpha": alpha_val,
+            "coverage": coverage,
+            "sharpness": sha,
+            "interval score": interval_score
         })
 
     return pd.DataFrame(results)
