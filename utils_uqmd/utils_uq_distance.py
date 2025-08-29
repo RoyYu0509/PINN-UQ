@@ -139,7 +139,7 @@ class DistanceUQPINN(BasePINNModel):
         X_test:      torch.Tensor,
         *,
         heuristic_u: str   = "feature",   # 'feature' | 'latent'
-        n_samples:           int   = 10,
+        n_samples:           int   = 20,
         return_band: bool  = True,
     ):
         """

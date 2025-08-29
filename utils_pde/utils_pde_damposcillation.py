@@ -105,3 +105,43 @@ class DampedOscillator1D(BasePDE):
         v0_true = torch.as_tensor(self.v0, dtype=u_t0.dtype, device=device)
 
         return ((u0_pred - u0_true) ** 2 + (u_t0 - v0_true) ** 2).mean()
+    
+    def data_generation_uniform(
+        self,
+        n: int,
+        *,
+        device=None,
+        dtype=None,
+        return_true=True,
+    ):
+        """
+        Draw n points uniformly over the domain and (optionally) evaluate the true solution.
+
+        Args
+        ----
+        n : int
+            number of sample points
+        device, dtype : optional
+            torch device/dtype for the returned tensors (defaults from torch.get_default_dtype())
+        return_true : bool
+            whether to also return u_true(t) if self.true_solution is available
+
+        Returns
+        -------
+        t : (n,1) tensor
+        u_true : (n,1) tensor or None
+        """
+        if device is None:
+            device = torch.device("cpu")
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+
+        # uniform samples in [t0, t1]
+        t = (self.t1 - self.t0) * torch.rand(n, 1, device=device, dtype=dtype) + self.t0
+
+        if return_true and self.true_solution is not None:
+            # evaluate true solution (expects a torch.Tensor)
+            u = self.true_solution(t)
+            return t, u
+        else:
+            return t, None

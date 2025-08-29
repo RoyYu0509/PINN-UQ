@@ -134,8 +134,23 @@ class AllenCahn2D():
     # PDE residual   ‖λΔu + u(u²−1) − f‖²
     # ------------------------------------------------------------------ #
     def residual(self, model, coloc_pt_num: int) -> torch.Tensor:
-        xy = self._sample_interior(coloc_pt_num)
+        # strictly uniform interior grid (exclude boundary)
+        device = next(model.parameters()).device
+        Lx, Ly = (self.x1 - self.x0), (self.y1 - self.y0)
+
+        # choose grid counts so spacing is uniform per axis and total ≥ target
+        N = max(1, int(coloc_pt_num))
+        b = math.sqrt(N / (Lx * Ly))
+        Nx = max(1, math.ceil(b * Lx))
+        Ny = max(1, math.ceil(b * Ly))
+
+        xs = torch.linspace(self.x0, self.x1, Nx + 2, device=device, dtype=torch.float32)[1:-1]
+        ys = torch.linspace(self.y0, self.y1, Ny + 2, device=device, dtype=torch.float32)[1:-1]
+        X, Y = torch.meshgrid(xs, ys, indexing="ij")
+        xy = torch.stack([X.reshape(-1), Y.reshape(-1)], dim=1)
+
         return (self._residual(model, xy) ** 2).mean()
+
 
     def _residual(self, model, xy: torch.Tensor) -> torch.Tensor:
         xy = xy.requires_grad_(True)

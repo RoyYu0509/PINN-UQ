@@ -43,7 +43,7 @@ def plot_truth_and_samples_1D(
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(t_dense, y_dense, lw=2, label="true solution")
     ax.scatter(t_train, y_train, s=25, alpha=0.7, label="training points")
-    ax.scatter(x_colloc_np, [0.0] * len(x_colloc_np), color='red', marker='x', label="Collocation points", alpha=0.6)
+    # ax.scatter(x_colloc_np, [0.0] * len(x_colloc_np), color='red', marker='x', label="Collocation points", alpha=0.6)
 
     ax.set_xlabel("t")
     ax.set_ylabel("x(t)")
@@ -51,6 +51,7 @@ def plot_truth_and_samples_1D(
     ax.legend()
     ax.grid(True, linestyle="--", linewidth=0.3)
     plt.tight_layout()
+    # plt.show()
 
 
 """
@@ -189,72 +190,110 @@ def plot_expected_vs_empirical(df, alpha_col='alpha', cov_col='coverage', title=
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 
 def plot_dual_expected_vs_empirical(
     df_uncal,
-    df_cal, 
-    alpha_col='alpha',
-    cov_col='coverage',
-    title1='Uncalibrated Model',
-    title2='Calibrated Model',
-    dev_metric='mae',
-    main_title=None,
-    **unused
+    df_cal,
+    *,
+    alpha_col="alpha",
+    cov_col="coverage",
+    title1="Uncalibrated Model",
+    title2="Calibrated Model",
+    dev_metric="mae",
+    main_title="Coverage: Uncalibrated vs Calibrated",
+    figsize=(12, 6),
+    constrained=True,           # set False if you prefer tight_layout()
+    title_pad=14,               # vertical offset for the figure title
+    tight_rect=(0, 0, 1, 0.96), # head-room if constrained=False
 ):
     """
-    Plots side-by-side coverage plots for uncalibrated and calibrated models,
-    with subtitle showing deviation from ideal calibration.
+    Side-by-side coverage plots for uncalibrated and calibrated models.
+
+    The subtitle of each panel shows the deviation from ideal calibration
+    (MAE / RMSE / max absolute error).
+
+    Parameters
+    ----------
+    df_uncal, df_cal : pd.DataFrame
+        Must contain columns `alpha_col` and `cov_col`.
+    dev_metric : {"mae", "rmse", "max"}
+        Metric used for the deviation shown under each panel title.
+    main_title : str or None
+        Figure-level title.  Set None to suppress it.
+    constrained : bool
+        Use Matplotlib’s constrained-layout engine (recommended).
+        If False, the function falls back to tight_layout with `tight_rect`.
     """
 
-    def prepare_coverage_data(df):
-        expected = 1 - df[alpha_col]
-        empirical = df[cov_col]
-        expected_full = pd.concat([pd.Series([0.0]), expected, pd.Series([1.0])], ignore_index=True)
-        empirical_full = pd.concat([pd.Series([0.0]), empirical, pd.Series([1.0])], ignore_index=True)
-        sorted_idx = expected_full.argsort()
-        return expected_full[sorted_idx], empirical_full[sorted_idx]
+    # ------------------------------------------------------------------
+    # helpers
+    def _prepare(df):
+        exp = 1.0 - df[alpha_col]
+        emp = df[cov_col]
+        exp_full = pd.concat([pd.Series([0.0]), exp, pd.Series([1.0])],
+                             ignore_index=True)
+        emp_full = pd.concat([pd.Series([0.0]), emp, pd.Series([1.0])],
+                             ignore_index=True)
+        order = exp_full.argsort()
+        return exp_full[order].to_numpy(), emp_full[order].to_numpy()
 
-    def coverage_deviation(exp, emp, how="mae"):
-        diff = np.abs(emp - exp)
+    def _deviation(e, m, how):
+        diff = np.abs(m - e)
         if how == "mae":
             return diff.mean()
-        elif how == "rmse":
-            return np.sqrt((diff**2).mean())
-        elif how == "max":
+        if how == "rmse":
+            return np.sqrt((diff ** 2).mean())
+        if how == "max":
             return diff.max()
-        else:
-            raise ValueError("metric must be 'mae', 'rmse', or 'max'")
+        raise ValueError("dev_metric must be 'mae', 'rmse', or 'max'")
 
-    # Prepare data and compute deviations
-    exp1, emp1 = prepare_coverage_data(df_uncal)
-    exp2, emp2 = prepare_coverage_data(df_cal)
+    # ------------------------------------------------------------------
+    # data + metrics
+    exp1, emp1 = _prepare(df_uncal)
+    exp2, emp2 = _prepare(df_cal)
+    dev1 = _deviation(exp1, emp1, dev_metric)
+    dev2 = _deviation(exp2, emp2, dev_metric)
 
-    dev1 = coverage_deviation(exp1, emp1, how=dev_metric)
-    dev2 = coverage_deviation(exp2, emp2, how=dev_metric)
+    # ------------------------------------------------------------------
+    # figure & axes
+    if constrained:
+        fig, axes = plt.subplots(1, 2, figsize=figsize,
+                                 constrained_layout=True)
+    else:
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    # Create subplots
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-
-    # Plot uncalibrated
-    axes[0].plot(exp1, emp1, marker='o', label='Empirical Coverage')
-    axes[0].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
-    axes[0].set_title(f"{title1}\nDeviation ({dev_metric.upper()}): {dev1:.3f}")
-    axes[0].set_xlabel("Expected Coverage (1 − α)")
+    # panel 1 – uncalibrated
+    axes[0].plot(exp1, emp1, marker="o", label="Empirical")
+    axes[0].plot([0, 1], [0, 1], "--", color="gray", label="Ideal  y=x")
+    axes[0].set_title(f"{title1}")
+    axes[0].set_xlabel("Expected Coverage  (1 − α)")
     axes[0].set_ylabel("Empirical Coverage")
     axes[0].grid(True)
     axes[0].legend()
 
-    # Plot calibrated
-    axes[1].plot(exp2, emp2, marker='o', label='Empirical Coverage')
-    axes[1].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y = x)')
-    axes[1].set_title(f"{title2}\nDeviation ({dev_metric.upper()}): {dev2:.3f}")
-    axes[1].set_xlabel("Expected Coverage (1 − α)")
+    # panel 2 – calibrated
+    axes[1].plot(exp2, emp2, marker="o", label="Empirical")
+    axes[1].plot([0, 1], [0, 1], "--", color="gray", label="Ideal  y=x")
+    axes[1].set_title(f"{title2}")
+    axes[1].set_xlabel("Expected Coverage  (1 − α)")
     axes[1].set_ylabel("Empirical Coverage")
     axes[1].grid(True)
     axes[1].legend()
-    if main_title is not None:
-        plt.title(main_title, pad=20, fontsize=12)
-    plt.tight_layout()
+
+    # ------------------------------------------------------------------
+    # figure-level title and layout finish
+    if main_title:
+        fig.suptitle(main_title, y=0.96, fontsize=12)
+
+    if not constrained:            # tidy up only if we skipped the CL engine
+        fig.tight_layout(rect=tight_rect)
+
+    return fig, axes
+
 
 
 
@@ -312,7 +351,7 @@ def plot_2D_comparison_with_coverage(
     cov_col='coverage',
     metric: str = "mae",
     main_title=None,
-    grid_size=500
+    grid_size=20
 ):
     import matplotlib.pyplot as plt
     import numpy as np
@@ -415,7 +454,8 @@ def plot_2D_comparison_with_coverage(
     imshow_plot(axs[0, 2], width_uncal_grid, vlim_pred_width, "Interval Width (Uncalibrated)")
     axs[0, 3].plot(exp1, emp1, marker='o', label='Empirical')
     axs[0, 3].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y=x)')
-    axs[0, 3].set_title(f"Coverage (Uncalibrated)\n{metric.upper()}={dev1:.3f}")
+    # axs[0, 3].set_title(f"Coverage (Uncalibrated)\n{metric.upper()}={dev1:.3f}")
+    axs[0, 3].set_title(f"Coverage (Uncalibrated)")
     axs[0, 3].set_xlabel("Expected Coverage (1 − α)")
     axs[0, 3].set_ylabel("Empirical Coverage")
     axs[0, 3].legend()
@@ -427,7 +467,8 @@ def plot_2D_comparison_with_coverage(
     imshow_plot(axs[1, 2], width_cal_grid, vlim_pred_width, "Interval Width (Calibrated)")
     axs[1, 3].plot(exp2, emp2, marker='o', label='Empirical')
     axs[1, 3].plot([0, 1], [0, 1], '--', color='gray', label='Ideal (y=x)')
-    axs[1, 3].set_title(f"Coverage (Calibrated)\n{metric.upper()}={dev2:.3f}")
+    # axs[1, 3].set_title(f"Coverage (Calibrated)\n{metric.upper()}={dev2:.3f}")
+    axs[1, 3].set_title(f"Coverage (Calibrated)")
     axs[1, 3].set_xlabel("Expected Coverage (1 − α)")
     axs[1, 3].set_ylabel("Empirical Coverage")
     axs[1, 3].legend()
@@ -794,7 +835,8 @@ def plot_metrics_table(
     exp2, emp2 = prepare_coverage_data(df2)
     dev1 = coverage_deviation(exp1, emp1)  # Using the default metrics
     dev2 = coverage_deviation(exp2, emp2)  # Using the default metrics
-
+    print(f"Uncal dev:{dev1}")
+    print(f"Cal dev:{dev2}")
     alpha_level_upper = alpha_level + 1e-3
     alpha_level_lower = alpha_level - 1e-3
     
@@ -863,79 +905,206 @@ def _to_1d_np(arr):
     return np.asarray(arr).reshape(-1)
 
 
+import numpy as np
+import matplotlib.pyplot as plt
+
 def plot_1d_intervals_comparison(
     X_test,
-    uncal_interval,
-    cp_intervals,
-    true_solution,                       # array OR callable
-    uncal_interval_label="Naive band",
-    cal_interval_label="Conformal band",
+    uncal_interval,                  # (n_lower, n_upper)
+    cp_intervals,                    # (cp_lower, cp_upper)
+    true_solution,                   # array OR callable f(X_test)
+    uncal_interval_label="Before CP",
+    cal_interval_label="After CP",
     t_train=None,
     y_train=None,
     title="PINN Prediction with Conformal & Naïve Intervals",
-    figsize=(8, 5),
-    colors=None,
-    alpha_cp=0.5,
-    alpha_naive=0.3,
+    figsize=(7, 5),
+    colors=None,                     # optional dict to override colors by key
+    alpha_cp=1.0,
+    alpha_naive=1.0,
+    dot_size=20,
+    dot_edge_size=0.5,
+
 ):
     """
-    Plot true solution, predicted mean (mid-point of naïve band),
-    and two uncertainty bands.
-
-    true_solution can be:
-        • array-like of shape (N_test,)  OR
-        • a function f(t) → array-like  evaluated at X_test
+    Matches the styling/semantics of the plotting script:
+      - CP-band mean is drawn as dashed prediction line
+      - Legend at lower center with compact handles
+      - Labeling uses x / u(x), fontsize=14, ylabel rotation=0
+      - Same color palette and scatter edge styling
     """
-    # ------------------------------------------------------------
-    # 1. Evaluate the truth if the user handed in a function
-    if callable(true_solution):
-        true_solution = true_solution(X_test)
 
-    # 2. Flatten / convert to 1-D NumPy
-    X_test = _to_1d_np(X_test)
-    true_solution = _to_1d_np(true_solution)
-
-    n_lower, n_upper = uncal_interval
-    n_lower = _to_1d_np(n_lower)
-    n_upper = _to_1d_np(n_upper)
-    n_pred_mean = (n_lower + n_upper) / 2
-
-    cp_lower, cp_upper = cp_intervals
-    cp_lower = _to_1d_np(cp_lower)
-    cp_upper = _to_1d_np(cp_upper)
-    # (Optional) mean of the conformal band if you ever need it:
-    # cp_pred_mean = (cp_lower + cp_upper) / 2
-    # ------------------------------------------------------------
-    # 3. Colours
-    col = {
-        "truth": "k--",
-        "mean": "b",
-        "cp_fill": "green",
-        "naive_fill": "blue",
+    # --- default palette (same constants as your script) ---
+    palette = {
+        "COL_NAIV": "#f7c5c8",
+        "COL_MEAN": "#b13c32",
+        "COL_CP":   "#abccf4",
+        "COL_TRUE": "#222222",
+        "COL_SCAT": "#f6d09f",
+        "COL_EDGE": "#222222",
     }
     if colors:
-        col.update(colors)
-    # ------------------------------------------------------------
-    # 4. Plot
-    plt.figure(figsize=figsize)
-    plt.plot(X_test, true_solution, col["truth"], label="True $x(t)$")
-    plt.plot(X_test, n_pred_mean, col["mean"], label="Predicted mean")
+        palette.update(colors)
+    COL_NAIV = palette["COL_NAIV"]
+    COL_MEAN = palette["COL_MEAN"]
+    COL_CP   = palette["COL_CP"]
+    COL_TRUE = palette["COL_TRUE"]
+    COL_SCAT = palette["COL_SCAT"]
+    COL_EDGE = palette["COL_EDGE"]
 
-    plt.fill_between(
-        X_test, n_lower, n_upper, color=col["naive_fill"], alpha=alpha_naive, label=uncal_interval_label
-    )
+    # --- evaluate truth if callable ---
+    if callable(true_solution):
+        true_vals = np.asarray(true_solution(X_test)).ravel()
+    else:
+        true_vals = np.asarray(true_solution).ravel()
 
+    # --- to 1D arrays ---
+    x = np.asarray(X_test).ravel()
+    n_lower, n_upper = [np.asarray(a).ravel() for a in uncal_interval]
+    cp_lower, cp_upper = [np.asarray(a).ravel() for a in cp_intervals]
 
-    plt.fill_between(
-        X_test, cp_lower, cp_upper, color=col["cp_fill"], alpha=alpha_cp, label=cal_interval_label
-    )
+    # CP mean (to match your script)
+    pred_mean = (cp_lower + cp_upper) / 2.0
 
+    # --- plot ---
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # wide -> narrow bands first for nicer layering
+    ax.fill_between(x, n_lower, n_upper, color=COL_NAIV, alpha=alpha_naive,
+                    label=uncal_interval_label, zorder=2)
+    ax.fill_between(x, cp_lower, cp_upper, color=COL_CP, alpha=alpha_cp,
+                    label=cal_interval_label, zorder=1)
+
+    # mean + truth
+    ax.plot(x, pred_mean, ls="--", lw=2.0, color=COL_MEAN,
+            label=r"Prediction", zorder=5)
+    ax.plot(x, true_vals, lw=2.4, color=COL_TRUE,
+            label=r"True", zorder=3)
+
+    # training data (optional)
     if t_train is not None and y_train is not None:
-        plt.scatter(_to_1d_np(t_train), _to_1d_np(y_train), color="red", s=12, label="Training data")
+        ax.scatter(np.asarray(t_train).ravel(), np.asarray(y_train).ravel(),
+                   s=dot_size, facecolor=COL_SCAT, edgecolors=COL_EDGE,
+                   linewidth=dot_edge_size, label="Data", zorder=4)
 
-    plt.xlabel("Time $t$")
-    plt.ylabel("Displacement $x$")
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
+    # labels to match script
+    ax.set_xlabel(r"$x$", fontsize=14)
+    ax.set_ylabel(r"$u(x)$", fontsize=14, rotation=0)
+
+    # layout/styling to match script
+    ax.margins(x=0)
+    ax.legend(loc="lower center", handlelength=1.6, borderpad=0.6)
+    ax.set_title(title)
+    fig.tight_layout()
+
+    return fig, ax
+
+
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+# from matplotlib.colors import Normalize, TwoSlopeNorm, LogNorm  # optional if you want to use `norm`
+
+def plot_uq_field(
+    XY_grid: torch.Tensor,
+    true_solution,                 # callable: (N,2) torch -> (N,) or (N,1)
+    pred_set=None,                 # tuple(lower, upper) torch tensors (optional if mode='true')
+    *,
+    mode: str = "mean",            # 'true' | 'mean' | 'width'
+    grid_shape=None,               # (H, W); if None, inferred as square
+    extent=None,                   # [xmin, xmax, ymin, ymax]; if None, inferred from XY_grid
+    vlim=None,                     # (vmin, vmax) or None
+    scatter=None,                  # (x_pts, y_pts) numpy arrays or None
+    cmap="viridis",
+    figsize=(6, 5),
+    colorbar_label=None,
+    cbar_kwargs=None,              # <- NEW: dict passed to fig.colorbar
+    norm=None,                     # <- NEW: matplotlib.colors.Normalize (overrides vlim)
+    title="",
+
+):
+    """
+    Plot a single 2D field for: the true solution ('true'), predictive mean ('mean'),
+    or predictive interval width ('width').
+
+    Use `vlim=(vmin, vmax)` or `norm=...` to keep multiple plots on the same color scale.
+    Customize the color legend via `cbar_kwargs`, e.g. {'ticks': np.linspace(...), 'format': '%.2f'}.
+    """
+    # ---- infer grid shape ----
+    N = XY_grid.shape[0]
+    if grid_shape is None:
+        side = int(round(np.sqrt(N)))
+        if side * side != N:
+            raise ValueError(
+                "grid_shape not provided and XY_grid is not square-lengthed; "
+                f"N={N} cannot form H×W with H=W."
+            )
+        H = W = side
+    else:
+        H, W = grid_shape
+        if H * W != N:
+            raise ValueError(f"grid_shape {grid_shape} incompatible with XY_grid length {N}.")
+
+    # ---- extent from XY_grid if needed ----
+    x = XY_grid[:, 0].detach().cpu().numpy()
+    y = XY_grid[:, 1].detach().cpu().numpy()
+    if extent is None:
+        extent = [float(x.min()), float(x.max()), float(y.min()), float(y.max())]
+
+    # ---- build the field to plot ----
+    mode = mode.lower()
+    if mode == "true":
+        with torch.no_grad():
+            z = true_solution(XY_grid).detach().cpu().numpy().reshape(-1)
+        field = z.reshape(H, W)
+        default_label = "u(x, y)"
+    elif mode in ("mean", "width"):
+        if pred_set is None or len(pred_set) != 2:
+            raise ValueError("pred_set=(lower, upper) is required for mode 'mean' or 'width'.")
+        lower = pred_set[0].detach().cpu().numpy().reshape(-1)
+        upper = pred_set[1].detach().cpu().numpy().reshape(-1)
+        if mode == "mean":
+            field = ((lower + upper) / 2.0).reshape(H, W)
+            default_label = "Predictive mean"
+        else:  # 'width'
+            field = (upper - lower).reshape(H, W)
+            default_label = "Interval width"
+    else:
+        raise ValueError("mode must be 'true', 'mean', or 'width'.")
+
+    # ---- plot ----
+    fig, ax = plt.subplots(figsize=figsize)
+    # If norm is provided, don't pass vmin/vmax (matplotlib will warn if both are given)
+    imshow_kwargs = dict(
+        extent=extent,
+        origin="lower",
+        aspect="auto",
+        interpolation="nearest",
+        cmap=cmap,
+    )
+    if norm is not None:
+        imshow_kwargs["norm"] = norm
+    else:
+        if vlim is not None:
+            imshow_kwargs["vmin"], imshow_kwargs["vmax"] = vlim
+
+    im = ax.imshow(field, **imshow_kwargs)
+
+    # Colorbar with customizable legend
+    cbar = fig.colorbar(im, ax=ax, **(cbar_kwargs or {}))
+    # Only set label if user didn't pass one via cbar_kwargs
+    if not (cbar_kwargs and ("label" in cbar_kwargs)):
+        cbar.set_label(colorbar_label or default_label)
+
+    if scatter is not None and scatter[0] is not None and scatter[1] is not None:
+        ax.scatter(scatter[0], scatter[1], s=10, c="black", alpha=0.8, label="Sample Points")
+        ax.legend(loc="upper right")
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_title(
+        title
+    )
+    fig.tight_layout()
+    return fig, ax, field

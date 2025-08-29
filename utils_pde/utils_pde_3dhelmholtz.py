@@ -94,11 +94,25 @@ class Helmholtz3D(BasePDE):
     # Collocation residual ‖·‖² averaged over N interior samples
     # ------------------------------------------------------------------ #
     def residual(self, model, coloc_pt_num: int) -> torch.Tensor:
-        x = torch.rand(coloc_pt_num, 1) * (self.x1 - self.x0) + self.x0
-        y = torch.rand(coloc_pt_num, 1) * (self.y1 - self.y0) + self.y0
-        z = torch.rand(coloc_pt_num, 1) * (self.z1 - self.z0) + self.z0
-        xyz = torch.cat([x, y, z], dim=1).to(dtype=torch.float32)
+        # strictly uniform interior grid (exclude boundary)
+        device = next(model.parameters()).device
+        Lx, Ly, Lz = (self.x1 - self.x0), (self.y1 - self.y0), (self.z1 - self.z0)
+
+        # choose grid counts so spacing is uniform per axis and total ≥ target
+        N = max(1, int(coloc_pt_num))
+        a = (N / (Lx * Ly * Lz)) ** (1.0 / 3.0)
+        Nx = max(1, math.ceil(a * Lx))
+        Ny = max(1, math.ceil(a * Ly))
+        Nz = max(1, math.ceil(a * Lz))
+
+        xs = torch.linspace(self.x0, self.x1, Nx + 2, device=device, dtype=torch.float32)[1:-1]
+        ys = torch.linspace(self.y0, self.y1, Ny + 2, device=device, dtype=torch.float32)[1:-1]
+        zs = torch.linspace(self.z0, self.z1, Nz + 2, device=device, dtype=torch.float32)[1:-1]
+        X, Y, Z = torch.meshgrid(xs, ys, zs, indexing="ij")
+        xyz = torch.stack([X.reshape(-1), Y.reshape(-1), Z.reshape(-1)], dim=1)
+
         return (self._residual(model, xyz) ** 2).mean()
+
 
     # ------------------------------------------------------------------ #
     # Dirichlet boundary loss  u|∂Ω = 0               (six cube faces)
