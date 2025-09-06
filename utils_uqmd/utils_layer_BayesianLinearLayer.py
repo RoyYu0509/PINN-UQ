@@ -3,21 +3,50 @@ import torch
 import torch.nn as nn
 import math
 
+
+
+# def default_mu_rho(in_features, out_features,
+#                    mu_std=0.1, rho=-3.0,
+#                    mu_mean=0.0,
+#                    prior_std=1.0):
+
+#     # Weights and Biases Distribution Initialization
+#     weight_mu = nn.Parameter(torch.empty(out_features, in_features).normal_(mu_mean, mu_std))
+#     weight_rho = nn.Parameter(torch.empty(out_features, in_features).fill_(rho))
+#     bias_mu = nn.Parameter(torch.empty(out_features).normal_(mu_mean, mu_std))
+#     bias_rho = nn.Parameter(torch.empty(out_features).fill_(rho))
+
+#     # Std of the prior distribution
+#     prior_std = prior_std
+
+#     return weight_mu, weight_rho, bias_mu, bias_rho, prior_std
+
+
+import torch
+import torch.nn as nn
+
 def default_mu_rho(in_features, out_features,
-                   mu_std=0.1, rho=-3.0,
-                   mu_mean=0.0,
-                   prior_std=1.0):
+                  mu_std=0.1,        # accepted for API compatibility, unused
+                  rho=-3.0,
+                  prior_std=1.0,
+                  gain=None):
+    if gain is None:
+        # if using tanh activations downstream, this is recommended
+        gain = nn.init.calculate_gain('tanh')  # 5/3
 
-    # Weights and Biases Distribution Initialization
-    weight_mu = nn.Parameter(torch.empty(out_features, in_features).normal_(mu_mean, mu_std))
-    weight_rho = nn.Parameter(torch.empty(out_features, in_features).fill_(rho))
-    bias_mu = nn.Parameter(torch.empty(out_features).normal_(mu_mean, mu_std))
-    bias_rho = nn.Parameter(torch.empty(out_features).fill_(rho))
+    # Weight mean
+    weight_mu = nn.Parameter(torch.empty(out_features, in_features))
+    nn.init.xavier_uniform_(weight_mu, gain=gain)
 
-    # Std of the prior distribution
-    prior_std = prior_std
+    # Bias mean: typically start from zero
+    bias_mu = nn.Parameter(torch.zeros(out_features))
 
-    return weight_mu, weight_rho, bias_mu, bias_rho, prior_std
+    # Rho parameters (pre-softplus)
+    weight_rho = nn.Parameter(torch.full((out_features, in_features), rho))
+    bias_rho   = nn.Parameter(torch.full((out_features,), rho))
+
+    return weight_mu, weight_rho, bias_mu, bias_rho, float(prior_std)
+
 
 class BayesianLinearLayer(BaseLayer):
     """

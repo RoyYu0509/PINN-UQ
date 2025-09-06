@@ -30,7 +30,7 @@ class AllenCahn2D():
         domain: Tuple[Tuple[float, float], Tuple[float, float]] = ((-1.0, 1.0),
                                                                    (-1.0, 1.0)),
         true_solution: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
-        b_pts_n: int = 1000,          # <── default number of boundary pts
+        b_pts_n: int = 800,          # <── default number of boundary pts
     ):
         self.lam = lam
         self.domain = domain
@@ -45,6 +45,8 @@ class AllenCahn2D():
             )
         self.true_solution = true_solution
 
+    # interior = 1024
+
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
@@ -56,115 +58,138 @@ class AllenCahn2D():
     # ------------------------------------------------------------------ #
     # autograd-based forcing term
     # ------------------------------------------------------------------ #
+    # --- autograd-based forcing term (surgical tweak: device/dtype safety) ---
     def _forcing(self, xy: torch.Tensor) -> torch.Tensor:
         xy = xy.requires_grad_(True)
         u = self.true_solution(xy)
+        # ensure device/dtype match for autograd chain
+        if u.device != xy.device or u.dtype != xy.dtype:
+            u = u.to(device=xy.device, dtype=xy.dtype)
+
         grads = torch.autograd.grad(u, xy, torch.ones_like(u), create_graph=True)[0]
         u_xx = torch.autograd.grad(grads[:, 0:1], xy,
-                                   torch.ones_like(grads[:, 0:1]),
-                                   create_graph=True)[0][:, 0:1]
+                                torch.ones_like(grads[:, 0:1]),
+                                create_graph=True)[0][:, 0:1]
         u_yy = torch.autograd.grad(grads[:, 1:2], xy,
-                                   torch.ones_like(grads[:, 1:2]),
-                                   create_graph=True)[0][:, 1:2]
+                                torch.ones_like(grads[:, 1:2]),
+                                create_graph=True)[0][:, 1:2]
         lap = u_xx + u_yy
         nonlinear = u ** 3 - u
         return self.lam * lap + nonlinear
 
-    # ------------------------------------------------------------------ #
-    # deterministic, evenly–spaced boundary set
-    # ------------------------------------------------------------------ #
+    # --- boundary sampler (surgical rewrite: even spacing, exact N, clear corners) ---
     def _build_boundary_pts(self, N: int) -> torch.Tensor:
-        """Return N points distributed (almost) equally on the 4 edges."""
-        N = int(N)
-        per_edge = [N // 4] * 4
-        for k in range(N % 4):  # distribute remainder deterministically
-            per_edge[k] += 1
+        """Return exactly N evenly spaced boundary points with corners handled once."""
+        N = int(max(0, N))
+        if N == 0:
+            return torch.empty(0, 2, dtype=torch.float32)
 
-        # helper to linspace without duplicating corners
-        def edge_linspace(a, b, m, include_first=True, include_last=True):
-            if m == 0:
-                return torch.empty(0)
-            if m == 1:
-                return torch.tensor([a if include_first else b])
-            t = torch.linspace(0.0, 1.0, m)
-            if not include_first:
-                t = t[1:]
-            if not include_last:
-                t = t[:-1]
+        x0, x1, y0, y1 = self.x0, self.x1, self.y0, self.y1
+        Lx, Ly = (x1 - x0), (y1 - y0)
+
+        # helper: interior linspace EXCLUDING endpoints
+        def lin_exclude(a, b, m, *, device=None, dtype=None):
+            if m <= 0:
+                return torch.empty(0, device=device, dtype=dtype)
+            t = torch.linspace(0.0, 1.0, m + 2, device=device, dtype=dtype)[1:-1]
             return a + (b - a) * t
 
-        # Build edges
-        pts = []
+        device = torch.device("cpu")
+        dtype = torch.float32
 
-        # left  (x = x0, varying y)  – include both corners
-        y_left = edge_linspace(self.y0, self.y1, per_edge[0])
-        pts.append(torch.stack([torch.full_like(y_left, self.x0), y_left], dim=1))
+        if N < 4:
+            # place up to N corners in fixed order
+            corners = torch.tensor([[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                                dtype=dtype, device=device)
+            return corners[:N]
 
-        # right (x = x1)
-        y_right = edge_linspace(self.y0, self.y1, per_edge[1],
-                                include_first=False, include_last=False)
-        pts.append(torch.stack([torch.full_like(y_right, self.x1), y_right], dim=1))
+        # include corners once
+        corners = torch.tensor([[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+                            dtype=dtype, device=device)
+        remain = N - 4
 
-        # bottom (y = y0)
-        x_bot = edge_linspace(self.x0, self.x1, per_edge[2], include_first=False)
-        pts.append(torch.stack([x_bot, torch.full_like(x_bot, self.y0)], dim=1))
+        # distribute remaining interior edge points proportional to edge length
+        weights = {"left": Ly, "right": Ly, "bottom": Lx, "top": Lx}
+        W = sum(weights.values())
+        raw = {e: remain * (w / W) for e, w in weights.items()}
+        base = {e: int(math.floor(v)) for e, v in raw.items()}
+        rem = remain - sum(base.values())
+        # largest remainder rounding
+        fracs = sorted(((raw[e] - base[e], e) for e in base.keys()), reverse=True)
+        for k in range(rem):
+            base[fracs[k][1]] += 1
 
-        # top (y = y1)
-        x_top = edge_linspace(self.x0, self.x1, per_edge[3], include_first=False,
-                              include_last=False)
-        pts.append(torch.stack([x_top, torch.full_like(x_top, self.y1)], dim=1))
+        pts = [corners]
+        # left edge interior (x=x0, y varying), exclude corners
+        y = lin_exclude(y0, y1, base["left"], device=device, dtype=dtype)
+        pts.append(torch.stack([torch.full_like(y, x0), y], dim=1))
+        # right edge interior (x=x1)
+        y = lin_exclude(y0, y1, base["right"], device=device, dtype=dtype)
+        pts.append(torch.stack([torch.full_like(y, x1), y], dim=1))
+        # bottom edge interior (y=y0)
+        x = lin_exclude(x0, x1, base["bottom"], device=device, dtype=dtype)
+        pts.append(torch.stack([x, torch.full_like(x, y0)], dim=1))
+        # top edge interior (y=y1)
+        x = lin_exclude(x0, x1, base["top"], device=device, dtype=dtype)
+        pts.append(torch.stack([x, torch.full_like(x, y1)], dim=1))
 
-        return torch.cat(pts, dim=0).to(torch.float32)[:N]  # exact N points
+        xy = torch.cat(pts, dim=0)
+        # truncate in the unlikely event rounding overflowed
+        return xy[:N]
 
-    # ------------------------------------------------------------------ #
-    # boundary loss   (now deterministic)
-    # ------------------------------------------------------------------ #
+    # --- boundary loss (surgical tweak: device/dtype & true_solution safety) ---
     def boundary_loss(self, model) -> torch.Tensor:
         """
-        Dirichlet MSE on a deterministic set of boundary points.
-        If n_b is given and ≠ self.b_pts_n, a temporary deterministic set
-        of that size is generated; otherwise the cached one is used.
+        Dirichlet MSE on a deterministic set of boundary points (evenly spaced).
+        Uses exactly self.b_pts_n points; corners are included once when b_pts_n >= 4.
         """
-        xy_bdy = self._build_boundary_pts(int(self.b_pts_n))
-        # ensure device match
-        xy_bdy = xy_bdy.to(next(model.parameters()).device, non_blocking=True)
-        return torch.mean((model(xy_bdy) - self.true_solution(xy_bdy)) ** 2)
+        p = next(model.parameters())
+        device, dtype = p.device, p.dtype
 
-    # ------------------------------------------------------------------ #
-    # PDE residual   ‖λΔu + u(u²−1) − f‖²
-    # ------------------------------------------------------------------ #
+        xy_bdy = self._build_boundary_pts(int(self.b_pts_n)).to(device=device, dtype=dtype)
+        u_true = self.true_solution(xy_bdy)
+        if u_true.device != xy_bdy.device or u_true.dtype != xy_bdy.dtype:
+            u_true = u_true.to(device=xy_bdy.device, dtype=xy_bdy.dtype)
+
+        return torch.mean((model(xy_bdy) - u_true) ** 2)
+
+    # --- residual (surgical tweak: even interior grid + model dtype) ---
     def residual(self, model, coloc_pt_num: int) -> torch.Tensor:
-        # strictly uniform interior grid (exclude boundary)
-        device = next(model.parameters()).device
-        Lx, Ly = (self.x1 - self.x0), (self.y1 - self.y0)
+        # strictly uniform interior grid (exclude boundary), matching model device/dtype
+        p = next(model.parameters())
+        device, dtype = p.device, p.dtype
 
-        # choose grid counts so spacing is uniform per axis and total ≥ target
+        Lx, Ly = (self.x1 - self.x0), (self.y1 - self.y0)
         N = max(1, int(coloc_pt_num))
         b = math.sqrt(N / (Lx * Ly))
         Nx = max(1, math.ceil(b * Lx))
         Ny = max(1, math.ceil(b * Ly))
 
-        xs = torch.linspace(self.x0, self.x1, Nx + 2, device=device, dtype=torch.float32)[1:-1]
-        ys = torch.linspace(self.y0, self.y1, Ny + 2, device=device, dtype=torch.float32)[1:-1]
+        xs = torch.linspace(self.x0, self.x1, Nx + 2, device=device, dtype=dtype)[1:-1]
+        ys = torch.linspace(self.y0, self.y1, Ny + 2, device=device, dtype=dtype)[1:-1]
         X, Y = torch.meshgrid(xs, ys, indexing="ij")
         xy = torch.stack([X.reshape(-1), Y.reshape(-1)], dim=1)
+        xy.requires_grad_(True)
 
         return (self._residual(model, xy) ** 2).mean()
 
-
+    # --- _residual (surgical tweak: shape normalize u before grads) ---
     def _residual(self, model, xy: torch.Tensor) -> torch.Tensor:
-        xy = xy.requires_grad_(True)
         u = model(xy)
+        if u.ndim == 1:
+            u = u.unsqueeze(-1)
+
         grads = torch.autograd.grad(u, xy, torch.ones_like(u), create_graph=True)[0]
         u_xx = torch.autograd.grad(grads[:, 0:1], xy,
-                                   torch.ones_like(grads[:, 0:1]),
-                                   create_graph=True)[0][:, 0:1]
+                                torch.ones_like(grads[:, 0:1]),
+                                create_graph=True)[0][:, 0:1]
         u_yy = torch.autograd.grad(grads[:, 1:2], xy,
-                                   torch.ones_like(grads[:, 1:2]),
-                                   create_graph=True)[0][:, 1:2]
+                                torch.ones_like(grads[:, 1:2]),
+                                create_graph=True)[0][:, 1:2]
         lap = u_xx + u_yy
         nonlinear = u ** 3 - u
         return self.lam * lap + nonlinear - self._forcing(xy)
+
 
     # ------------------------------------------------------------------ #
     # synthetic data generation
@@ -188,3 +213,94 @@ class AllenCahn2D():
             return (torch.tensor(xy, dtype=torch.float32),
                     torch.tensor(u,  dtype=torch.float32))
         return xy, u
+    
+    def solution_field_on_grid(
+        self,
+        n: int,
+        *,
+        include_boundary: bool = True,
+        flatten: bool = True,
+        source: str = "true",                 # "true" or "model"
+        model: torch.nn.Module | None = None, # required if source=="model"
+        device: torch.device | None = None,
+        dtype: torch.dtype = torch.float32,
+        with_forcing: bool = False,
+    ):
+        """
+        Generate an n×n uniform field of points and the corresponding solution values.
+
+        Returns:
+            If flatten=True:
+                (xy, u) or (xy, u, f)
+                - xy: (n*n, 2)
+                - u:  (n*n, 1)
+                - f:  (n*n, 1) if with_forcing
+            If flatten=False:
+                (X, Y, U) or (X, Y, U, F)
+                - X, Y, U: (n, n)
+                - F: (n, n) if with_forcing
+        """
+        if n <= 0:
+            raise ValueError("n must be a positive integer")
+
+        # Resolve device sensibly
+        if device is None and source == "model":
+            if model is None:
+                raise ValueError("When source='model', you must provide a model.")
+            device = next(model.parameters()).device
+        device = torch.device(device) if device is not None else torch.device("cpu")
+
+        # Build grid (uses your earlier helper if present; otherwise inline)
+        if hasattr(self, "uniform_grid_pts"):
+            xy = self.uniform_grid_pts(
+                n, include_boundary=include_boundary, flatten=True, device=device, dtype=dtype
+            )
+        else:
+            # Inline grid (equivalent to uniform_grid_pts)
+            if include_boundary:
+                xs = torch.linspace(self.x0, self.x1, n, dtype=dtype, device=device)
+                ys = torch.linspace(self.y0, self.y1, n, dtype=dtype, device=device)
+            else:
+                xs = torch.linspace(self.x0, self.x1, n + 2, dtype=dtype, device=device)[1:-1]
+                ys = torch.linspace(self.y0, self.y1, n + 2, dtype=dtype, device=device)[1:-1]
+            Xg, Yg = torch.meshgrid(xs, ys, indexing="ij")
+            xy = torch.stack([Xg.reshape(-1), Yg.reshape(-1)], dim=1)
+
+        # Compute solution values
+        if source == "true":
+            with torch.no_grad():
+                u = self.true_solution(xy)
+        elif source == "model":
+            if model is None:
+                raise ValueError("When source='model', you must provide a model.")
+            with torch.no_grad():
+                u = model(xy)
+        else:
+            raise ValueError("source must be 'true' or 'model'")
+
+        out = None
+        if with_forcing:
+            # Uses autograd internally; do NOT wrap in no_grad
+            f = self._forcing(xy)
+
+        if flatten:
+            out = (xy, u) if not with_forcing else (xy, u, f)
+        else:
+            # Recover meshgrids for convenience
+            if hasattr(self, "uniform_grid_pts"):
+                Xg, Yg = self.uniform_grid_pts(
+                    n, include_boundary=include_boundary, flatten=False, device=device, dtype=dtype
+                )
+            else:
+                # Reuse the inline grids if they exist; otherwise reconstruct
+                xs = xy[:, 0].reshape(n, n)  # consistent with meshgrid(indexing='ij')
+                ys = xy[:, 1].reshape(n, n)
+                Xg, Yg = xs, ys
+            U = u.reshape(n, n)
+            if with_forcing:
+                F = f.reshape(n, n)
+                out = (Xg, Yg, U, F)
+            else:
+                out = (Xg, Yg, U)
+
+        return out

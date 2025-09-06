@@ -24,9 +24,10 @@ class Poisson1D(BasePDE):
             residuals: tensor of shape [coloc_pt_num, 1]
         """
         # Uniformly sample collocation points (excluding t=0 for boundary condition)
-        t = torch.linspace(self.x0, self.x1, coloc_pt_num).view(-1, 1)
-        t = t.to(dtype=torch.float32)
-        return (self._residual(model, t) ** 2).mean()
+        # t = torch.linspace(self.x0, self.x1, coloc_pt_num).view(-1, 1)
+        x = torch.linspace(self.x0, self.x1, steps=coloc_pt_num+2)[1:-1].unsqueeze(-1)
+        x = x.to(dtype=torch.float32)
+        return (self._residual(model, x) ** 2).mean()
 
     def _residual(self, model, x):
         """Compute the PDE residual r(x) = u''(x) - f(x)."""

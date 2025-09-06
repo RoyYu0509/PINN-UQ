@@ -20,9 +20,19 @@ def unflatten_params(model, theta_vec):
         idx += n
     assert idx == theta_vec.numel(), "θ size mismatch"
 
-# -----------------------------------------------------------------------------
-# FastHMCBPINN
-# -----------------------------------------------------------------------------
+
+def xavier_init(layer, gain=None):
+    """
+    Xavier initialization for nn.Linear layers (good for tanh).
+    """
+    if gain is None:
+        gain = nn.init.calculate_gain("tanh")
+    nn.init.xavier_uniform_(layer.weight, gain=gain)
+    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(layer.weight)
+    bound = 1 / math.sqrt(fan_in)
+    nn.init.uniform_(layer.bias, -bound, bound)
+
+
 class HMCBPINN(nn.Module):
     """
     Vectorised HMC PINN with tqdm bars and device-safe grads.
@@ -41,7 +51,9 @@ class HMCBPINN(nn.Module):
         dims = [input_dim] + hidden_dims + [output_dim]
         layers = []
         for d_in, d_out in zip(dims[:-1], dims[1:]):
-            layers.append(nn.Linear(d_in, d_out))
+            linear = nn.Linear(d_in, d_out)
+            xavier_init(linear) 
+            layers.append(linear)
             if d_out != output_dim:
                 layers.append(act_func())
         self.net = nn.Sequential(*layers).to(device)

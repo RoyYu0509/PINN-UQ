@@ -3,16 +3,17 @@ import torch
 import torch.nn as nn
 import math
 
-def kaiming_init(weights, bias, a):
-    # Initialize weights and bias (similar to PyTorch default)
-    nn.init.kaiming_uniform_(weights, a)
+def xavier_init(weights, bias, gain=None):
+    if gain is None:
+        gain = nn.init.calculate_gain('tanh')  # ≈ 5/3
+    nn.init.xavier_uniform_(weights, gain=gain)
     fan_in, _ = nn.init._calculate_fan_in_and_fan_out(weights)
     bound = 1 / math.sqrt(fan_in)
     nn.init.uniform_(bias, -bound, bound)
 
 class DeterministicLinear(nn.Module):
     """A standard linear layer with deterministic weights and biases, like nn.Linear."""
-    def __init__(self, in_features, out_features, initialization=kaiming_init):
+    def __init__(self, in_features, out_features, initialization=xavier_init):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -20,7 +21,7 @@ class DeterministicLinear(nn.Module):
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         self.bias = nn.Parameter(torch.empty(out_features))
         # Weights initialization
-        initialization(self.weight, self.bias, math.sqrt(5))
+        initialization(self.weight, self.bias)
 
 
     def forward(self, x):

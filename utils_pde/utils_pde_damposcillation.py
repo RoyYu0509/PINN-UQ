@@ -57,13 +57,14 @@ class DampedOscillator1D(BasePDE):
     # PDE residual ‖r(t)‖² over N random collocation points
     # ──────────────────────────────────────────────────────────────────────────
     def residual(self, model: nn.Module, coloc_pt_num: int) -> torch.Tensor:
-        device = next(model.parameters()).device
-        t = (self.x1 - self.x0) * torch.rand(
-            coloc_pt_num, 1, device=device, dtype=torch.get_default_dtype()
-        ) + self.x0
-        t.requires_grad_(True)
+        p = next(model.parameters())
+        device, dtype = p.device, p.dtype
 
-        r = self._residual(model, t)
+        # N interior points, evenly spaced, endpoints excluded
+        x = torch.linspace(self.x0, self.x1, steps=coloc_pt_num + 2,
+                        device=device, dtype=dtype)[1:-1].unsqueeze(-1)
+        x.requires_grad_(True)
+        r = self._residual(model, x)
         return (r**2).mean()
 
     def _residual(self, model: nn.Module, t: torch.Tensor) -> torch.Tensor:

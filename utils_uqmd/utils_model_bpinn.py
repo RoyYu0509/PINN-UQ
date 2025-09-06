@@ -43,10 +43,7 @@ class BayesianFeedForwardNN(BasePINNModel):
         return kl_total
 
     def nll_gaussian(self, y_pred, y_true, data_noise_guess=1.0):
-        """
-        Full Gaussian Negative Log-Likelihood:
-        NLL = N/2 * log(2πσ²) + 1/(2σ²) * sum((y - y_pred)^2)
-        """
+        # omit constant
         mse = (y_pred - y_true).pow(2).sum()
         # const = N * torch.log(torch.tensor(2 * math.pi * data_noise_guess ** 2))
         nll = 0.5 * (mse / (data_noise_guess ** 2))

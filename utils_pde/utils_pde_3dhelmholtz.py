@@ -30,7 +30,7 @@ class Helmholtz3D(BasePDE):
     true_solution : Callable[[Tensor], Tensor]
         Exact solution u*(x,y,z) for testing / synthetic data.
     b_pts_n : int
-        Number of boundary points sampled per boundary_loss() call.
+        points per face
     """
 
     # ------------------------------------------------------------------ #
@@ -47,12 +47,14 @@ class Helmholtz3D(BasePDE):
             * torch.sin(math.pi * xyz[..., 1:2])
             * torch.sin(math.pi * xyz[..., 2:3])
         ),
-        b_pts_n: int = 1_000,
+        b_pts_n: int = 1024,
     ):
         self.k = k
         (self.x0, self.x1), (self.y0, self.y1), (self.z0, self.z1) = domain
         self.true_solution = true_solution
         self.b_pts_n = b_pts_n
+
+    # interior points = 27000
 
     # ------------------------------------------------------------------ #
     # Forcing term f(x,y,z) matching the analytic solution
@@ -89,6 +91,8 @@ class Helmholtz3D(BasePDE):
 
         laplace_u = u_xx + u_yy + u_zz
         return laplace_u + self.k ** 2 * u - self._forcing(xyz)
+    
+
 
     # ------------------------------------------------------------------ #
     # Collocation residual ‖·‖² averaged over N interior samples
@@ -118,23 +122,28 @@ class Helmholtz3D(BasePDE):
     # Dirichlet boundary loss  u|∂Ω = 0               (six cube faces)
     # ------------------------------------------------------------------ #
     def boundary_loss(self, model) -> torch.Tensor:
-        n_b = self.b_pts_n
-        x = torch.rand(n_b, 1) * (self.x1 - self.x0) + self.x0
-        y = torch.rand(n_b, 1) * (self.y1 - self.y0) + self.y0
-        z = torch.rand(n_b, 1) * (self.z1 - self.z0) + self.z0
+        p = next(model.parameters()); device, dtype = p.device, p.dtype
+        n_face = int(self.b_pts_n)
 
-        # Six faces of the cube
-        xyz_bdry = torch.cat(
-            [
-                torch.cat([torch.full_like(y, self.x0), y, z], dim=1),  # x = x0
-                torch.cat([torch.full_like(y, self.x1), y, z], dim=1),  # x = x1
-                torch.cat([x, torch.full_like(x, self.y0), z], dim=1),  # y = y0
-                torch.cat([x, torch.full_like(x, self.y1), z], dim=1),  # y = y1
-                torch.cat([x, y, torch.full_like(x, self.z0)], dim=1),  # z = z0
-                torch.cat([x, y, torch.full_like(x, self.z1)], dim=1),  # z = z1
-            ],
-            dim=0,
-        ).to(dtype=torch.float32)
+        # choose nx*ny ~ n_face (deterministic)
+        nx = max(1, int(round(math.sqrt(n_face))))
+        ny = max(1, int(round(n_face / nx)))
+        # exclude edges to avoid double-counting across faces
+        xs = torch.linspace(self.x0, self.x1, nx + 2, device=device, dtype=dtype)[1:-1]
+        ys = torch.linspace(self.y0, self.y1, ny + 2, device=device, dtype=dtype)[1:-1]
+        X, Y = torch.meshgrid(xs, ys, indexing="ij")
+        xy = torch.stack([X.reshape(-1), Y.reshape(-1)], dim=1)
+
+        # Build 6 faces with interior face grids (no edges)
+        faces = [
+            torch.stack([torch.full((xy.size(0),), self.x0, device=device, dtype=dtype), xy[:,1], xy[:,0]], dim=1),  # x=x0
+            torch.stack([torch.full((xy.size(0),), self.x1, device=device, dtype=dtype), xy[:,1], xy[:,0]], dim=1),  # x=x1
+            torch.stack([xy[:,0], torch.full((xy.size(0),), self.y0, device=device, dtype=dtype), xy[:,1]], dim=1),  # y=y0
+            torch.stack([xy[:,0], torch.full((xy.size(0),), self.y1, device=device, dtype=dtype), xy[:,1]], dim=1),  # y=y1
+            torch.stack([xy[:,0], xy[:,1], torch.full((xy.size(0),), self.z0, device=device, dtype=dtype)], dim=1),  # z=z0
+            torch.stack([xy[:,0], xy[:,1], torch.full((xy.size(0),), self.z1, device=device, dtype=dtype)], dim=1),  # z=z1
+        ]
+        xyz_bdry = torch.cat(faces, dim=0)  # total ≈ 6 * (nx*ny), deterministic and even
 
         u_pred = model(xyz_bdry)
         return (u_pred ** 2).mean()
